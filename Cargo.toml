@@ -2,6 +2,11 @@
 name = "alpacka"
 version = "0.1.0"
 edition = "2024"
+description = "A engine agnostic asset packaging format"
+license = "Unlicense"
+license-file = "UNLICENSE"
+authors = ["Luramoth"]
+repository = "https://github.com/Luramoth/alpacka"
 
 [dependencies]
 deflate = "1.0.0"
