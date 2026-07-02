@@ -4,8 +4,13 @@ pub const MAGIC_NUMBER: u32 = 0x4B504C41;
 /// The current version of Alpacka
 pub const VERSION: u32 = 1;
 
+/// the size of the Header type in the current specification
+pub const HEADER_SIZE: usize = size_of::<Header>();
+
+pub const ENTRY_SIZE: usize = size_of::<Entry>();
+
 /// The type of compression used for each entry
-#[repr(u16)]
+#[repr(u32)]
 pub enum CompressionType{
     /// No compression
     None = 0,
@@ -37,8 +42,10 @@ pub struct Header {
 
 /// Metadata for each file entry
 pub struct Entry {
-    /// File path hashed using FNV-1a
-    pub path_hash: u64,
+    /// 32 bits reserved for custom data
+    pub custom1: u32,
+    /// 32 bits reserved for custom data
+    pub custom2: u32,
     /// Offset to where the file data is contained
     pub data_offset: u32,
     /// Size of the file when it's compressed
@@ -46,22 +53,9 @@ pub struct Entry {
     /// The size the file should be when no longer compressed
     pub original_size: u32,
     /// The style of compression used, refer to format::CompressionType
-    pub compression_type: u16,
+    pub compression_type: u32,
     /// Offset to the entry's file path string
     pub name_offset: u32,
     /// Padding
     pub reserved: u32,
-}
-
-/// Hashes a filepath using FNV-1a
-pub fn hash_path(path: &str) -> u64 {
-    const OFFSET: u64 = 14695981039346656037;
-    const PRIME: u64 = 1099511628211;
-
-    let mut hash = OFFSET;
-    for c in path.to_lowercase().replace("\\", "/").chars() {
-        hash ^= c as u64;
-        hash *= PRIME;
-    }
-    hash
 }
