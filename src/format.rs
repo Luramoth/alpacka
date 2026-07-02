@@ -11,6 +11,7 @@ pub const ENTRY_SIZE: usize = size_of::<Entry>();
 
 /// The type of compression used for each entry
 #[repr(u32)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CompressionType{
     /// No compression
     None = 0,
