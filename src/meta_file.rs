@@ -35,7 +35,7 @@ impl Default for Pack {
 
 pub fn load_or_default(path: &Path) -> Meta {
     let result = fs::read_to_string(path);
-    let mut text: String;
+    let text: String;
 
     if result.is_err() {
         return Meta::default();
