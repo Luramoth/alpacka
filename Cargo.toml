@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 description = "A engine agnostic asset packaging format"
 license = "Unlicense"
-license-file = "UNLICENSE"
 authors = ["Luramoth"]
 repository = "https://github.com/Luramoth/alpacka"
 
@@ -14,3 +13,7 @@ lz4 = "1.28.1"
 toml = "1.1.2"
 zstd = "0.13.3"
 serde = { version = "1.0.228", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+pretty_assertions = "1.4.1"
