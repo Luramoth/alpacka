@@ -83,3 +83,82 @@ impl Reader {
         })
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::format;
+    use std::io::{BufWriter, Error, Write};
+    use std::path::{Path, PathBuf};
+    use tempfile::env::temp_dir;
+    use wincode::serialize_into;
+    use crate::format::CompressionType;
+    use super::*;
+
+    fn build_test_archive(header: &mut Header) -> Result<PathBuf, Error> {
+        let temp_dir = temp_dir().join("test.alpack");
+        let mut writer = BufWriter::new(File::create(&temp_dir)?);
+        let content = "lorem ipsum dolor";
+        let mut names: Vec<String> = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
+        let mut index_offset = 0;
+
+        header.data_offset = HEADER_SIZE as u32;
+        header.string_table_offset = (HEADER_SIZE + (content.len() * header.entry_count as usize)) as u32;
+
+        for i in 0..header.entry_count {
+            let mut current_name_table_offset = 0;
+            for name in names.iter() {
+                current_name_table_offset += name.len()
+            }
+
+            names.push(format(format_args!("fake/file.{}\0", i)));
+            entries.push(Entry {
+                custom1: 0,
+                custom2: 0,
+                data_offset: content.len() as u32 * i,
+                compressed_size: content.len() as u32,
+                original_size: content.len() as u32,
+                compression_type: CompressionType::None as u32,
+                name_offset: current_name_table_offset as u32,
+                reserved: 0,
+            });
+        }
+        let mut string_table_end = 0;
+        for name in names.iter() {
+            string_table_end += name.len() as u32
+        }
+
+        header.index_offset = header.string_table_offset + string_table_end;
+
+        serialize_into(&mut writer, &*header).expect("failed to serialise header");
+        for _ in 0..header.entry_count {
+            writer.write_all(content.as_bytes())?;
+        }
+        for name in names.iter(){
+            writer.write_all(name.as_bytes())?;
+        }
+        for entry in entries {
+            serialize_into(&mut writer, &entry).expect("failed to serialise entry");
+        }
+
+        writer.flush()?;
+        drop(writer);
+
+        Ok(temp_dir)
+    }
+
+    #[test]
+    fn idk() {
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 2,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        build_test_archive(&mut header).unwrap();
+    }
+}
