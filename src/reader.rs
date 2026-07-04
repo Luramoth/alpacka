@@ -1,6 +1,8 @@
-﻿use std::collections::HashMap;
+﻿use std::string::String;
+use std::collections::HashMap;
 use std::fs::{File};
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::Path;
 use crate::format::{Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 
 pub struct Reader{
