@@ -106,13 +106,10 @@ mod tests {
         header.data_offset = HEADER_SIZE as u32;
         header.string_table_offset = (HEADER_SIZE + (content.len() * header.entry_count as usize)) as u32;
 
+        let mut current_name_table_offset = 0;
         for i in 0..header.entry_count {
-            let mut current_name_table_offset = 0;
-            for name in names.iter() {
-                current_name_table_offset += name.len()
-            }
+            let name = format!("fake/file.{}\0", i);
 
-            names.push(format(format_args!("fake/file.{}\0", i)));
             entries.push(Entry {
                 custom1: 0,
                 custom2: 0,
@@ -123,6 +120,9 @@ mod tests {
                 name_offset: current_name_table_offset as u32,
                 reserved: 0,
             });
+
+            current_name_table_offset += name.len();
+            names.push(name);
         }
         let mut string_table_end = 0;
         for name in names.iter() {
@@ -153,7 +153,7 @@ mod tests {
         let mut header = Header {
             magic: MAGIC_NUMBER,
             version: VERSION,
-            entry_count: 10,
+            entry_count: 1000,
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
@@ -165,7 +165,7 @@ mod tests {
 
         assert_eq!(reader.header.magic, MAGIC_NUMBER);
         assert_eq!(reader.header.version, VERSION);
-        assert_eq!(reader.header.entry_count, 10);
+        assert_eq!(reader.header.entry_count, 1000);
     }
 
     #[test]
