@@ -58,11 +58,19 @@ impl Reader {
                 continue;
             }
 
-            let mut name = String::new();
-            if reader.read_to_string(&mut name).is_err() {
+            let mut name_buf: Vec<u8> = Vec::new();
+            if reader.read_until(0, &mut name_buf).is_err() {
                 println!("Error: invalid String table entry, skipping.");
                 continue;
             }
+            name_buf.pop();
+            let name = match String::from_utf8(name_buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    println!("Error: invalid string table entry, skipping");
+                    continue;
+                }
+            };
 
 
             entries.insert(name, entry);
