@@ -24,15 +24,8 @@ impl Reader {
         if reader.read_exact(&mut header_buf).is_err() {
             Err("header corrupt")?}
 
-        let header = Header {
-            magic: u32::from_le_bytes(header_buf[0..4].try_into().map_err(|_| "header malformed")?),
-            version: u32::from_le_bytes(header_buf[4..8].try_into().map_err(|_| "header malformed")?),
-            entry_count: u32::from_le_bytes(header_buf[8..12].try_into().map_err(|_| "header malformed")?),
-            data_offset: u32::from_le_bytes(header_buf[12..16].try_into().map_err(|_| "header malformed")?),
-            string_table_offset: u32::from_le_bytes(header_buf[16..20].try_into().map_err(|_| "header malformed")?),
-            index_offset: u32::from_le_bytes(header_buf[20..24].try_into().map_err(|_| "header malformed")?),
-            reserved: u32::from_le_bytes(header_buf[24.. 28].try_into().map_err(|_| "header malformed")?),
-        };
+        let header: Header = wincode::deserialize(&header_buf)
+            .map_err(|e| format!("Error: header malformed: {e}"))?;
 
         if header.magic != MAGIC_NUMBER{
             Err("Invalid Alpack archive")?;}
@@ -52,15 +45,12 @@ impl Reader {
                 continue;
             }
 
-            let entry = Entry {
-                custom1: u32::from_le_bytes(entry_buf[0..4].try_into().map_err(|_| "entry malformed")?),
-                custom2: u32::from_le_bytes(entry_buf[4..8].try_into().map_err(|_| "entry malformed")?),
-                data_offset: u32::from_le_bytes(entry_buf[8..12].try_into().map_err(|_| "entry malformed")?),
-                compressed_size: u32::from_le_bytes(entry_buf[12..16].try_into().map_err(|_| "entry malformed")?),
-                original_size: u32::from_le_bytes(entry_buf[16..20].try_into().map_err(|_| "entry malformed")?),
-                compression_type: u32::from_le_bytes(entry_buf[20..24].try_into().map_err(|_| "entry malformed")?),
-                name_offset: u32::from_le_bytes(entry_buf[24..28].try_into().map_err(|_| "entry malformed")?),
-                reserved: u32::from_le_bytes(entry_buf[28..32].try_into().map_err(|_| "entry malformed")?),
+            let entry: Entry = match wincode::deserialize(&entry_buf) {
+                Ok(e) => e,
+                Err(e) => {
+                    println!("Error: Invalid entry: {e}, skipping");
+                    continue;
+                }
             };
 
             if reader.seek(SeekFrom::Start((header.string_table_offset + entry.name_offset) as u64)).is_err() {
