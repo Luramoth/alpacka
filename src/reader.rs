@@ -87,10 +87,11 @@ impl Reader {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::format;
     use std::io::{BufWriter, Error, Write};
     use std::path::{Path, PathBuf};
+    use lipsum::lipsum;
     use tempfile::env::temp_dir;
+    use rand::{Rng, RngExt};
     use wincode::serialize_into;
     use pretty_assertions::assert_eq;
     use crate::format::CompressionType;
@@ -99,21 +100,25 @@ mod tests {
     fn build_test_archive(header: &mut Header, name: &str) -> Result<PathBuf, Error> {
         let temp_dir = temp_dir().join(name);
         let mut writer = BufWriter::new(File::create(&temp_dir)?);
-        let content = "lorem ipsum dolor";
         let mut names: Vec<String> = Vec::new();
         let mut entries: Vec<Entry> = Vec::new();
+        let mut data: Vec<u8> = Vec::new();
+
+        let mut rng = rand::rng();
 
         header.data_offset = HEADER_SIZE as u32;
-        header.string_table_offset = (HEADER_SIZE + (content.len() * header.entry_count as usize)) as u32;
 
         let mut current_name_table_offset = 0;
+        let mut data_length = 0;
         for i in 0..header.entry_count {
             let name = format!("fake/file.{}\0", i);
+
+            let content = if i == 0 {lipsum(3)} else {lipsum(rng.random_range(0..100))};
 
             entries.push(Entry {
                 custom1: 0,
                 custom2: 0,
-                data_offset: content.len() as u32 * i,
+                data_offset: data_length,
                 compressed_size: content.len() as u32,
                 original_size: content.len() as u32,
                 compression_type: CompressionType::None as u32,
@@ -122,19 +127,17 @@ mod tests {
             });
 
             current_name_table_offset += name.len();
+            data_length += content.len() as u32;
             names.push(name);
-        }
-        let mut string_table_end = 0;
-        for name in names.iter() {
-            string_table_end += name.len() as u32
+            data.extend_from_slice(content.as_bytes());
         }
 
-        header.index_offset = header.string_table_offset + string_table_end;
+        header.string_table_offset = header.data_offset + data_length;
+
+        header.index_offset = header.string_table_offset + current_name_table_offset as u32;
 
         serialize_into(&mut writer, &*header).expect("failed to serialise header");
-        for _ in 0..header.entry_count {
-            writer.write_all(content.as_bytes())?;
-        }
+        writer.write_all(data.as_slice())?;
         for name in names.iter(){
             writer.write_all(name.as_bytes())?;
         }
