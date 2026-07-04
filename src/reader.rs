@@ -10,8 +10,8 @@ pub struct Reader{
 }
 
 impl Reader {
-    pub fn new(path: &String) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("could not open {}: {}", path, e))?;
+    pub fn new(path: &Path) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("could not open {}: {}", path.to_str().unwrap().to_string(), e))?;
 
 
         let mut reader = BufReader::new(file);
