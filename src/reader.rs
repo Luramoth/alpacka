@@ -92,16 +92,16 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tempfile::env::temp_dir;
     use wincode::serialize_into;
+    use pretty_assertions::assert_eq;
     use crate::format::CompressionType;
     use super::*;
 
-    fn build_test_archive(header: &mut Header) -> Result<PathBuf, Error> {
-        let temp_dir = temp_dir().join("test.alpack");
+    fn build_test_archive(header: &mut Header, name: &str) -> Result<PathBuf, Error> {
+        let temp_dir = temp_dir().join(name);
         let mut writer = BufWriter::new(File::create(&temp_dir)?);
         let content = "lorem ipsum dolor";
         let mut names: Vec<String> = Vec::new();
         let mut entries: Vec<Entry> = Vec::new();
-        let mut index_offset = 0;
 
         header.data_offset = HEADER_SIZE as u32;
         header.string_table_offset = (HEADER_SIZE + (content.len() * header.entry_count as usize)) as u32;
@@ -149,16 +149,91 @@ mod tests {
     }
 
     #[test]
-    fn idk() {
+    fn reader_constructor_reads_correctly() {
         let mut header = Header {
             magic: MAGIC_NUMBER,
             version: VERSION,
-            entry_count: 2,
+            entry_count: 10,
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
             reserved: 0,
         };
-        build_test_archive(&mut header).unwrap();
+        let path = build_test_archive(&mut header, "test.alpack").unwrap();
+
+        let reader = Reader::new(path.as_path()).unwrap();
+
+        assert_eq!(reader.header.magic, MAGIC_NUMBER);
+        assert_eq!(reader.header.version, VERSION);
+        assert_eq!(reader.header.entry_count, 10);
+    }
+
+    #[test]
+    fn reader_constructor_fails_bad_magic() {
+        let mut magic_fail_header = Header {
+            magic: 0x6C696166, //"fail"
+            version: VERSION,
+            entry_count: 10,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let magic_fail_path = build_test_archive(&mut magic_fail_header, "fail.alpack").unwrap();
+
+        assert!(Reader::new(magic_fail_path.as_path()).is_err());
+    }
+
+    #[test]
+    fn reader_constructor_fails_future_version() {
+        let mut version_fail_header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION + 1,
+            entry_count: 10,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let version_fail_path = build_test_archive(&mut version_fail_header, "future.alpack").unwrap();
+
+        assert!(Reader::new(version_fail_path.as_path()).is_err());
+    }
+
+    #[test]
+    fn reader_constructor_fails_missing_file() {
+        let path = Path::new("/this/does/not/exist.alpack");
+
+        assert!(Reader::new(path).is_err());
+    }
+
+    #[test]
+    fn reader_constructor_fails_truncated_header() {
+        let path = temp_dir().join("truncated.alpack");
+
+        std::fs::write(&path, [0u8; 10]).unwrap();
+
+        assert!(Reader::new(&path).is_err());
+    }
+
+    #[test]
+    fn reader_constructor_fails_invalid_utf8_name() {
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "bad_utf8.alpack").unwrap();
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[header.string_table_offset as usize] = 0x80; // invalid UTF-8 lead byte
+        std::fs::write(&path, bytes).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        assert!(reader.entries.is_empty())
     }
 }
