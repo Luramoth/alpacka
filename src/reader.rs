@@ -32,12 +32,15 @@ impl Reader {
         if header.version > VERSION{
             Err("Version of Alpack archive is beyond current capabilities")?}
 
-        if reader.seek(SeekFrom::Start(header.index_offset as u64)).is_err() {
-            Err("Broken Index offset")?}
-
         let mut entries: HashMap<String, Entry> = HashMap::with_capacity(header.entry_count as usize);
 
-        for _ in 0..header.entry_count {
+        for i in 0..header.entry_count {
+            let entry_pos = header.index_offset as u64 + (i as u64) * (ENTRY_SIZE as u64);
+            if reader.seek(SeekFrom::Start(entry_pos)).is_err() {
+                println!("Error: invalid index offset for entry, skipping");
+                continue;
+            }
+
             let mut entry_buf = [0u8; ENTRY_SIZE];
 
             if reader.read_exact(&mut entry_buf).is_err() {
@@ -153,10 +156,12 @@ mod tests {
 
     #[test]
     fn reader_constructor_reads_correctly() {
+        let entries: u32 = 1000;
+
         let mut header = Header {
             magic: MAGIC_NUMBER,
             version: VERSION,
-            entry_count: 1000,
+            entry_count: entries,
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
@@ -168,7 +173,8 @@ mod tests {
 
         assert_eq!(reader.header.magic, MAGIC_NUMBER);
         assert_eq!(reader.header.version, VERSION);
-        assert_eq!(reader.header.entry_count, 1000);
+        assert_eq!(reader.header.entry_count, entries);
+        assert_eq!(reader.entries.len(), entries as usize);
     }
 
     #[test]
