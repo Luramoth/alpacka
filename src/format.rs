@@ -1,4 +1,6 @@
-﻿/// The little endian number used to denote the file as a valid Alpacka file "ALPK"
+﻿use wincode::{SchemaRead, SchemaWrite};
+
+/// The little endian number used to denote the file as a valid Alpacka file "ALPK"
 pub const MAGIC_NUMBER: u32 = 0x4B504C41;
 
 /// The current version of Alpacka
@@ -24,6 +26,7 @@ pub enum CompressionType{
 }
 
 /// Header at the start of the file denoting the necessary information to begin reading the file
+#[derive(SchemaWrite, SchemaRead)]
 pub struct Header {
     /// Number that identifies this file as a valid Alpacka file "ALPK"
     pub magic: u32,
@@ -42,12 +45,13 @@ pub struct Header {
 }
 
 /// Metadata for each file entry
+#[derive(SchemaWrite, SchemaRead)]
 pub struct Entry {
     /// 32 bits reserved for custom data
     pub custom1: u32,
     /// 32 bits reserved for custom data
     pub custom2: u32,
-    /// Offset to where the file data is contained
+    /// Offset to where the file data is contained relative to headers data offset
     pub data_offset: u32,
     /// Size of the file when it's compressed
     pub compressed_size: u32,
@@ -55,7 +59,7 @@ pub struct Entry {
     pub original_size: u32,
     /// The style of compression used, refer to format::CompressionType
     pub compression_type: u32,
-    /// Offset to the entry's file path string
+    /// Offset to the entry's file path string relative to headers string table offset
     pub name_offset: u32,
     /// Padding
     pub reserved: u32,
