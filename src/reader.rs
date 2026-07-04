@@ -1,9 +1,9 @@
-﻿use std::string::String;
+﻿use crate::format::{Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
-use std::fs::{File};
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
-use crate::format::{Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
+use std::string::String;
 
 pub struct Reader{
     pub header: Header,
@@ -67,7 +67,7 @@ impl Reader {
             let name = match String::from_utf8(name_buf) {
                 Ok(n) => n,
                 Err(e) => {
-                    println!("Error: invalid string table entry, skipping");
+                    println!("Error: invalid string table entry: {e}, skipping");
                     continue;
                 }
             };
@@ -87,15 +87,15 @@ impl Reader {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::format::CompressionType;
+    use lipsum::lipsum;
+    use pretty_assertions::assert_eq;
+    use rand::RngExt;
     use std::io::{BufWriter, Error, Write};
     use std::path::{Path, PathBuf};
-    use lipsum::lipsum;
     use tempfile::env::temp_dir;
-    use rand::{Rng, RngExt};
     use wincode::serialize_into;
-    use pretty_assertions::assert_eq;
-    use crate::format::CompressionType;
-    use super::*;
 
     fn build_test_archive(header: &mut Header, name: &str) -> Result<PathBuf, Error> {
         let temp_dir = temp_dir().join(name);
