@@ -1,22 +1,24 @@
-﻿use crate::format::{Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
+﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Cursor};
 use std::path::Path;
 use std::string::String;
+use positioned_io::ReadAt;
 
 pub struct Reader{
     pub header: Header,
-    reader: BufReader<File>,
+    file: File,
     entries: HashMap<String, Entry>
 }
 
 impl Reader {
+    /// Creates a new Alpack reader, catalogs all the entries of the archive to be referenced later
     pub fn new(path: &Path) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| format!("could not open {}: {}", path.to_str().unwrap().to_string(), e))?;
 
 
-        let mut reader = BufReader::new(file);
+        let mut reader = BufReader::new(&file);
 
 
         let mut header_buf = [0u8; HEADER_SIZE];
@@ -80,10 +82,39 @@ impl Reader {
         }
 
         Ok (Reader{
-            reader,
             header,
+            file,
             entries,
         })
+    }
+
+    pub fn extract(&self, name: &str) -> Result<Vec<u8>, String> {
+        let entry = self.entries.get(name)
+            .ok_or_else(|| format!("no such entry: {name}"))?;
+
+        let abs_offset = self.header.data_offset + entry.data_offset;
+
+        let mut compressed = vec![0u8; entry.compressed_size as usize];
+        self.file
+            .read_exact_at(abs_offset, &mut compressed)
+            .map_err(|e| format!("failed to read entry data for {name}: {e}"))?;
+
+        let mut decoder = Self::decompressor(Cursor::new(compressed), entry.compression_type)?;
+
+        let mut decompressed = Vec::with_capacity(entry.original_size as usize);
+        decoder.read_to_end(&mut decompressed)
+            .map_err(|e| format!("failed to decompress entry {name}: {e}"))?;
+
+        Ok(decompressed)
+    }
+
+    fn decompressor<'a, R: Read + 'a>( source: R, compression_type: CompressionType ) -> Result<Box<dyn Read + 'a>, String> {
+        match compression_type {
+            CompressionType::None => Ok(Box::new(source)),
+            CompressionType::Zstd => Ok(Box::new(zstd::stream::read::Decoder::new(source).map_err(|e| format!("Zstd decoder failed: {e}"))?)),
+            CompressionType::Deflate => Ok(Box::new(flate2::read::DeflateDecoder::new(source))),
+            CompressionType::Lz4 => Ok(Box::new(lz4::Decoder::new(source).map_err(|e| format!("lz4 decoder failed {e}"))?)),
+        }
     }
 }
 
@@ -244,5 +275,25 @@ mod tests {
 
         let reader = Reader::new(&path).unwrap();
         assert!(reader.entries.is_empty())
+    }
+
+    #[test]
+    fn extract_extracts_successfully() {
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "none_compression.alpack").unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let bytes = reader.extract("fake/file.0").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(3))
     }
 }
