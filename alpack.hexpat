@@ -132,7 +132,7 @@ struct entry {
     u64 NameOffset;
     u64 Reserved            [[color("f9f9f9")]];
     
-    if (CompressionType == 0) {
+    if (CompressionType != 1) {
         u8 data[CompressedSize] @ DataOffset + parent.Header.DataOffset;
     } else {
         zstd_frame_t zstd_frame @ DataOffset + parent.Header.DataOffset;
