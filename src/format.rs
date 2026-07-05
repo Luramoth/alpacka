@@ -1,4 +1,4 @@
-﻿use wincode::{SchemaRead, SchemaWrite, tag_encoding};
+﻿use wincode::{SchemaRead, SchemaWrite};
 
 /// The little endian number used to denote the file as a valid Alpacka file "ALPK"
 pub const MAGIC_NUMBER: u64 = 0x4B504C41;
