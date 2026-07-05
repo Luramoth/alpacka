@@ -313,28 +313,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_extracts_successfully() {
-        let word_count: usize = 30;
-
-        let mut header = Header {
-            magic: MAGIC_NUMBER,
-            version: VERSION,
-            entry_count: 1,
-            data_offset: 0,
-            string_table_offset: 0,
-            index_offset: 0,
-            reserved: 0,
-        };
-        let path = build_test_archive(&mut header, "none_compression.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
-
-        let reader = Reader::new(&path).unwrap();
-        let bytes = reader.extract("fake/file.0").unwrap();
-        let text = String::from_utf8(bytes).unwrap();
-
-        assert_eq!(text, lipsum(word_count))
-    }
-
-    #[test]
     fn extract_extracts_none_successfully() {
         let word_count: usize = 30;
 
