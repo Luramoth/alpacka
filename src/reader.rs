@@ -131,7 +131,31 @@ mod tests {
     use tempfile::env::temp_dir;
     use wincode::serialize_into;
 
-    fn build_test_archive(header: &mut Header, name: &str) -> Result<PathBuf, Error> {
+    fn compress(data: &[u8], compression_type: CompressionType) -> Vec<u8> {
+        match compression_type {
+            CompressionType::None => data.to_vec(),
+            CompressionType::Zstd => zstd::encode_all(data, 3).expect("zstd encode failed"),
+            CompressionType::Deflate => {
+                let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+                encoder.write_all(data).expect("deflate write failed");
+                encoder.finish().expect("deflate finish failed")
+            }
+            CompressionType::Lz4 => {
+                let mut encoder = lz4::EncoderBuilder::new().build(Vec::new()).expect("lz4 build failed");
+                encoder.write_all(data).expect("lz4 write failed");
+                let (compressed, result) = encoder.finish();
+                result.expect("lz4 finish failed");
+                compressed
+            }
+        }
+    }
+
+    fn build_test_archive(
+        header: &mut Header,
+        name: &str,
+        first_entry_words: Option<usize>,
+        first_entry_compression: Option<CompressionType>
+    ) -> Result<PathBuf, Error> {
         let temp_dir = temp_dir().join(name);
         let mut writer = BufWriter::new(File::create(&temp_dir)?);
         let mut names: Vec<String> = Vec::new();
@@ -147,23 +171,30 @@ mod tests {
         for i in 0..header.entry_count {
             let name = format!("fake/file.{}\0", i);
 
-            let content = if i == 0 {lipsum(3)} else {lipsum(rng.random_range(0..100))};
+            let (content, compression_type) = if i == 0 {
+                (lipsum(first_entry_words.unwrap_or(3)), first_entry_compression.unwrap_or(CompressionType::None))
+            } else {
+                (lipsum(rng.random_range(0..100)), CompressionType::None)
+            };
+
+            let original_bytes = content.as_bytes();
+            let compressed_bytes = compress(original_bytes, compression_type);
 
             entries.push(Entry {
                 custom1: 0,
                 custom2: 0,
                 data_offset: data_length,
-                compressed_size: content.len() as u64,
-                original_size: content.len() as u64,
-                compression_type: CompressionType::None,
+                compressed_size: compressed_bytes.len() as u64,
+                original_size: original_bytes.len() as u64,
+                compression_type,
                 name_offset: current_name_table_offset as u64,
                 reserved: 0,
             });
 
             current_name_table_offset += name.len();
-            data_length += content.len() as u64;
+            data_length += compressed_bytes.len() as u64;
             names.push(name);
-            data.extend_from_slice(content.as_bytes());
+            data.extend_from_slice(&compressed_bytes);
         }
 
         header.string_table_offset = header.data_offset + data_length;
@@ -185,6 +216,10 @@ mod tests {
         Ok(temp_dir)
     }
 
+    fn build_simple_archive(header: &mut Header, name: &str) -> Result<PathBuf, Error> {
+        build_test_archive(header, name, None, None)
+    }
+
     #[test]
     fn reader_constructor_reads_correctly() {
         let entries: u64 = 1000;
@@ -198,7 +233,7 @@ mod tests {
             index_offset: 0,
             reserved: 0,
         };
-        let path = build_test_archive(&mut header, "test.alpack").unwrap();
+        let path = build_simple_archive(&mut header, "test.alpack").unwrap();
 
         let reader = Reader::new(path.as_path()).unwrap();
 
@@ -219,7 +254,7 @@ mod tests {
             index_offset: 0,
             reserved: 0,
         };
-        let magic_fail_path = build_test_archive(&mut magic_fail_header, "fail.alpack").unwrap();
+        let magic_fail_path = build_simple_archive(&mut magic_fail_header, "fail.alpack").unwrap();
 
         assert!(Reader::new(magic_fail_path.as_path()).is_err());
     }
@@ -235,7 +270,7 @@ mod tests {
             index_offset: 0,
             reserved: 0,
         };
-        let version_fail_path = build_test_archive(&mut version_fail_header, "future.alpack").unwrap();
+        let version_fail_path = build_simple_archive(&mut version_fail_header, "future.alpack").unwrap();
 
         assert!(Reader::new(version_fail_path.as_path()).is_err());
     }
@@ -267,7 +302,7 @@ mod tests {
             index_offset: 0,
             reserved: 0,
         };
-        let path = build_test_archive(&mut header, "bad_utf8.alpack").unwrap();
+        let path = build_simple_archive(&mut header, "bad_utf8.alpack").unwrap();
 
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[header.string_table_offset as usize] = 0x80; // invalid UTF-8 lead byte
@@ -279,6 +314,8 @@ mod tests {
 
     #[test]
     fn extract_extracts_successfully() {
+        let word_count: usize = 30;
+
         let mut header = Header {
             magic: MAGIC_NUMBER,
             version: VERSION,
@@ -288,12 +325,100 @@ mod tests {
             index_offset: 0,
             reserved: 0,
         };
-        let path = build_test_archive(&mut header, "none_compression.alpack").unwrap();
+        let path = build_test_archive(&mut header, "none_compression.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
 
         let reader = Reader::new(&path).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
-        assert_eq!(text, lipsum(3))
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn extract_extracts_none_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "none_compression.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let bytes = reader.extract("fake/file.0").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn extract_extracts_zstd_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "zstd_compression.alpack", Some(word_count), Some(CompressionType::Zstd)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let bytes = reader.extract("fake/file.0").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn extract_extracts_deflate_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "deflate_compression.alpack", Some(word_count), Some(CompressionType::Deflate)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let bytes = reader.extract("fake/file.0").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn extract_extracts_lz4_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "lz4_compression.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let bytes = reader.extract("fake/file.0").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
     }
 }
