@@ -35,7 +35,7 @@ impl Reader {
         let mut entries: HashMap<String, Entry> = HashMap::with_capacity(header.entry_count as usize);
 
         for i in 0..header.entry_count {
-            let entry_pos = header.index_offset as u64 + (i as u64) * (ENTRY_SIZE as u64);
+            let entry_pos = header.index_offset + (i) * (ENTRY_SIZE as u64);
             if reader.seek(SeekFrom::Start(entry_pos)).is_err() {
                 println!("Error: invalid index offset for entry, skipping");
                 continue;
@@ -56,7 +56,7 @@ impl Reader {
                 }
             };
 
-            if reader.seek(SeekFrom::Start((header.string_table_offset + entry.name_offset) as u64)).is_err() {
+            if reader.seek(SeekFrom::Start(header.string_table_offset + entry.name_offset)).is_err() {
                 println!("Error: invalid String Table offset, skipping entry.");
                 continue;
             }
@@ -109,7 +109,7 @@ mod tests {
 
         let mut rng = rand::rng();
 
-        header.data_offset = HEADER_SIZE as u32;
+        header.data_offset = HEADER_SIZE as u64;
 
         let mut current_name_table_offset = 0;
         let mut data_length = 0;
@@ -122,22 +122,22 @@ mod tests {
                 custom1: 0,
                 custom2: 0,
                 data_offset: data_length,
-                compressed_size: content.len() as u32,
-                original_size: content.len() as u32,
-                compression_type: CompressionType::None as u32,
-                name_offset: current_name_table_offset as u32,
+                compressed_size: content.len() as u64,
+                original_size: content.len() as u64,
+                compression_type: CompressionType::None,
+                name_offset: current_name_table_offset as u64,
                 reserved: 0,
             });
 
             current_name_table_offset += name.len();
-            data_length += content.len() as u32;
+            data_length += content.len() as u64;
             names.push(name);
             data.extend_from_slice(content.as_bytes());
         }
 
         header.string_table_offset = header.data_offset + data_length;
 
-        header.index_offset = header.string_table_offset + current_name_table_offset as u32;
+        header.index_offset = header.string_table_offset + current_name_table_offset as u64;
 
         serialize_into(&mut writer, &*header).expect("failed to serialise header");
         writer.write_all(data.as_slice())?;
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn reader_constructor_reads_correctly() {
-        let entries: u32 = 1000;
+        let entries: u64 = 1000;
 
         let mut header = Header {
             magic: MAGIC_NUMBER,

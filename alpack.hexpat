@@ -113,24 +113,24 @@ struct zstd_frame_t {
 bool last_block_flag = false;
 
 struct header {
-    u32 MagicNumber;
-    u32 Version;
-    u32 EntryCount;
-    u32 DataOffset;
-    u32 StringTableOffset;
-    u32 IndexOffset;
-    u32 Reserved            [[color("f9f9f9")]];
+    u64 MagicNumber;
+    u64 Version;
+    u64 EntryCount;
+    u64 DataOffset;
+    u64 StringTableOffset;
+    u64 IndexOffset;
+    u64 Reserved            [[color("f9f9f9")]];
 };
 
 struct entry {
-    u32 custom1;
-    u32 custom2;
-    u32 DataOffset;
-    u32 CompressedSize;
-    u32 OrigonalSize;
-    u32 CompressionType;
-    u32 NameOffset;
-    u32 Reserved            [[color("f9f9f9")]];
+    u64 custom1;
+    u64 custom2;
+    u64 DataOffset;
+    u64 CompressedSize;
+    u64 OrigonalSize;
+    u64 CompressionType;
+    u64 NameOffset;
+    u64 Reserved            [[color("f9f9f9")]];
     
     if (CompressionType == 0) {
         u8 data[CompressedSize] @ DataOffset + parent.Header.DataOffset;
