@@ -64,6 +64,8 @@ pub struct Entry {
     pub compression_type: CompressionType,
     /// Offset to the entry's file path string relative to headers string table offset
     pub name_offset: u64,
+    /// Length of the file name in the string table
+    pub name_length: u64,
     /// Padding
     pub reserved: u64,
 }

@@ -130,6 +130,7 @@ struct entry {
     u64 OrigonalSize;
     u64 CompressionType;
     u64 NameOffset;
+    u64 NameLength;
     u64 Reserved            [[color("f9f9f9")]];
     
     if (CompressionType != 1) {
@@ -138,7 +139,7 @@ struct entry {
         zstd_frame_t zstd_frame @ DataOffset + parent.Header.DataOffset;
     }
     
-    char name[] @ parent.Header.StringTableOffset + NameOffset;
+    char name[NameLength] @ parent.Header.StringTableOffset + NameOffset;
 };
 
 struct alpack {

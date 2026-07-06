@@ -63,18 +63,11 @@ impl Reader {
                 continue;
             }
 
-            let mut name_buf: Vec<u8> = Vec::new();
-            let mut limited = (&mut reader).take(MAX_NAME_LENGTH);
-            if limited.read_until(0, &mut name_buf).is_err() {
-                println!("Error: invalid String table entry, skipping.");
+            let mut name_buf = vec![0u8; entry.name_length as usize];
+            if reader.read_exact(&mut name_buf).is_err() {
+                println!("Error: string table entry truncated, skipping.");
                 continue;
             }
-
-            if name_buf.last() != Some(&0) {
-                println!("Error: string table entry missing terminator (truncated or exceeds {MAX_NAME_LENGTH} bytes), skipping");
-                continue;
-            }
-            name_buf.pop();
 
             let name = match String::from_utf8(name_buf) {
                 Ok(n) => n,
@@ -214,7 +207,7 @@ mod tests {
         let mut current_name_table_offset = 0;
         let mut data_length = 0;
         for i in 0..header.entry_count {
-            let name = format!("fake/file.{}\0", i);
+            let name = format!("fake/file.{}", i);
 
             let (content, compression_type) = if i == 0 {
                 (lipsum(first_entry_words.unwrap_or(3)), first_entry_compression.unwrap_or(CompressionType::None))
@@ -233,6 +226,7 @@ mod tests {
                 original_size: original_bytes.len() as u64,
                 compression_type,
                 name_offset: current_name_table_offset as u64,
+                name_length: name.len() as u64,
                 reserved: 0,
             });
 
