@@ -108,7 +108,22 @@ impl Reader {
         Ok(decompressed)
     }
 
-    fn decompressor<'a, R: Read + 'a>( source: R, compression_type: CompressionType ) -> Result<Box<dyn Read + 'a>, String> {
+    pub fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String> {
+        let entry = self.entries.get(name)
+            .ok_or_else(|| format!("no such entry: {name}"))?;
+
+        let abs_offset = self.header.data_offset + entry.data_offset;
+
+        let bounded = BoundedPositionedReader {
+            file: &self.file,
+            pos: abs_offset,
+            remaining: entry.compressed_size,
+        };
+
+        Self::decompressor(bounded, entry.compression_type)
+    }
+
+    fn decompressor<'a, R: Read + Send +'a>( source: R, compression_type: CompressionType ) -> Result<Box<dyn Read + Send + 'a>, String> {
         match compression_type {
             CompressionType::None => Ok(Box::new(source)),
             CompressionType::Zstd => Ok(Box::new(zstd::stream::read::Decoder::new(source).map_err(|e| format!("Zstd decoder failed: {e}"))?)),
@@ -118,6 +133,27 @@ impl Reader {
     }
 }
 
+/// a lazy-reading adaptor over an entry's byte range in the archive
+/// carries its own independent read position so any number of these
+/// can run concurrently against the same `File` with no shared cursor
+struct BoundedPositionedReader<'a> {
+    file: &'a File,
+    pos: u64,
+    remaining: u64,
+}
+
+impl<'a> Read for BoundedPositionedReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.remaining == 0 {
+            return Ok(0);
+        }
+        let capacity = buf.len().min(self.remaining as usize);
+        let n = self.file.read_at(self.pos, &mut  buf[..capacity])?;
+        self.pos += n as u64;
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -128,6 +164,8 @@ mod tests {
     use rand::RngExt;
     use std::io::{BufWriter, Error, Write};
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::thread;
     use tempfile::env::temp_dir;
     use wincode::serialize_into;
 
@@ -397,6 +435,134 @@ mod tests {
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn stream_extracts_none_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "none_compression_stream.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let mut stream = reader.stream("fake/file.0").unwrap();
+
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn stream_extracts_zstd_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "zstd_compression_stream.alpack", Some(word_count), Some(CompressionType::Zstd)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let mut stream = reader.stream("fake/file.0").unwrap();
+
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn stream_extracts_deflate_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "deflate_compression_stream.alpack", Some(word_count), Some(CompressionType::Deflate)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let mut stream = reader.stream("fake/file.0").unwrap();
+
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn stream_extracts_lz4_successfully() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "lz4_compression_stream.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();
+
+        let reader = Reader::new(&path).unwrap();
+        let mut stream = reader.stream("fake/file.0").unwrap();
+
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn stream_works_across_threads() {
+        let word_count: usize = 30;
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "stream_threaded.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();
+
+        let reader = Arc::new(Reader::new(&path).unwrap());
+        let reader_clone = Arc::clone(&reader);
+
+        let handle = thread::spawn(move || {
+            let mut stream = reader_clone.stream("fake/file.0").unwrap();
+            let mut bytes = Vec::new();
+            stream.read_to_end(&mut bytes).unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+
+        let text = handle.join().expect("stream thread panicked");
         assert_eq!(text, lipsum(word_count))
     }
 }
