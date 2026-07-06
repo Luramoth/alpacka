@@ -1,4 +1,4 @@
-﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, MAX_NAME_LENGTH, VERSION};
+﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Cursor};

@@ -6,8 +6,6 @@ pub const MAGIC_NUMBER: u64 = 0x4B504C41;
 /// The current version of Alpacka
 pub const VERSION: u64 = 1;
 
-pub const MAX_NAME_LENGTH: u64 = 4096;
-
 /// the size of the Header type in the current specification
 pub const HEADER_SIZE: usize = size_of::<Header>();
 
