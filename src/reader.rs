@@ -1,4 +1,4 @@
-﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
+﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, MAX_NAME_LENGTH, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Cursor};
@@ -64,11 +64,18 @@ impl Reader {
             }
 
             let mut name_buf: Vec<u8> = Vec::new();
-            if reader.read_until(0, &mut name_buf).is_err() {
+            let mut limited = (&mut reader).take(MAX_NAME_LENGTH);
+            if limited.read_until(0, &mut name_buf).is_err() {
                 println!("Error: invalid String table entry, skipping.");
                 continue;
             }
+
+            if name_buf.last() != Some(&0) {
+                println!("Error: string table entry missing terminator (truncated or exceeds {MAX_NAME_LENGTH} bytes), skipping");
+                continue;
+            }
             name_buf.pop();
+
             let name = match String::from_utf8(name_buf) {
                 Ok(n) => n,
                 Err(e) => {
