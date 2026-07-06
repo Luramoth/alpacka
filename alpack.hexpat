@@ -127,7 +127,7 @@ struct entry {
     u64 custom2;
     u64 DataOffset;
     u64 CompressedSize;
-    u64 OrigonalSize;
+    u64 OriginalSize;
     u64 CompressionType;
     u64 NameOffset;
     u64 NameLength;

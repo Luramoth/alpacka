@@ -1,7 +1,7 @@
 ﻿use crate::format::{CompressionType, Entry, Header, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Cursor};
+use std::io::{BufReader, Read, Seek, SeekFrom, Cursor};
 use std::path::Path;
 use std::string::String;
 use positioned_io::ReadAt;
