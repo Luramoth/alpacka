@@ -41,6 +41,8 @@ pub struct Header {
     pub string_table_offset: u64,
     /// Location to the archive's index where entry information is stored.
     pub index_offset: u64,
+    /// a xxhash3-64 checksum for the whole index section to verify data integrity
+    pub index_checksum: u64,
     /// Padding
     pub reserved: u64,
 }

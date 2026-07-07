@@ -5,6 +5,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom, Cursor};
 use std::path::Path;
 use std::string::String;
 use positioned_io::ReadAt;
+use xxhash_rust::xxh3::xxh3_64;
 
 pub struct Reader{
     pub header: Header,
@@ -24,10 +25,10 @@ impl Reader {
         let mut header_buf = [0u8; HEADER_SIZE];
 
         if reader.read_exact(&mut header_buf).is_err() {
-            Err("header corrupt")?}
+            Err("Header corrupt")?}
 
         let header: Header = wincode::deserialize(&header_buf)
-            .map_err(|e| format!("Error: header malformed: {e}"))?;
+            .map_err(|e| format!("header malformed: {e}"))?;
 
         if header.magic != MAGIC_NUMBER{
             Err("Invalid Alpack archive")?;}
@@ -36,19 +37,20 @@ impl Reader {
 
         let mut entries: HashMap<String, Entry> = HashMap::with_capacity(header.entry_count as usize);
 
+        let mut entries_buf: Vec<u8> = vec![0u8; header.entry_count as usize * ENTRY_SIZE];
+
+        let entry_pos = header.index_offset;
+        reader.seek(SeekFrom::Start(entry_pos)).map_err(|e| format!("Entry index failed to seek: {e}"))?;
+        reader.read_exact(&mut entries_buf).map_err(|e| format!("Entry index failed to read: {e}"))?;
+
+        if xxh3_64(entries_buf.as_slice()) != header.index_checksum {
+            return Err("Index checksum mismatch".to_string())
+        }
+
         for i in 0..header.entry_count {
-            let entry_pos = header.index_offset + (i) * (ENTRY_SIZE as u64);
-            if reader.seek(SeekFrom::Start(entry_pos)).is_err() {
-                println!("Error: invalid index offset for entry, skipping");
-                continue;
-            }
+            let entry_pos = i as usize * ENTRY_SIZE;
 
-            let mut entry_buf = [0u8; ENTRY_SIZE];
-
-            if reader.read_exact(&mut entry_buf).is_err() {
-                println!("Error: Invalid entry, skipping");
-                continue;
-            }
+            let entry_buf = &entries_buf[entry_pos.. entry_pos + ENTRY_SIZE];
 
             let entry: Entry = match wincode::deserialize(&entry_buf) {
                 Ok(e) => e,
@@ -168,6 +170,7 @@ mod tests {
     use std::thread;
     use tempfile::env::temp_dir;
     use wincode::serialize_into;
+    use xxhash_rust::xxh3::xxh3_64;
 
     fn compress(data: &[u8], compression_type: CompressionType) -> Vec<u8> {
         match compression_type {
@@ -197,8 +200,8 @@ mod tests {
         let temp_dir = temp_dir().join(name);
         let mut writer = BufWriter::new(File::create(&temp_dir)?);
         let mut names: Vec<String> = Vec::new();
-        let mut entries: Vec<Entry> = Vec::new();
         let mut data: Vec<u8> = Vec::new();
+        let mut entries: Vec<u8> = Vec::new();
 
         let mut rng = rand::rng();
 
@@ -218,7 +221,7 @@ mod tests {
             let original_bytes = content.as_bytes();
             let compressed_bytes = compress(original_bytes, compression_type);
 
-            entries.push(Entry {
+            let entry = Entry {
                 custom1: 0,
                 custom2: 0,
                 data_offset: data_length,
@@ -228,26 +231,29 @@ mod tests {
                 name_offset: current_name_table_offset as u64,
                 name_length: name.len() as u64,
                 reserved: 0,
-            });
+            };
+
+            let mut entry_buf:Vec<u8> = Vec::with_capacity(ENTRY_SIZE);
+            serialize_into(&mut entry_buf, &entry).expect("failed to serialise entry");
 
             current_name_table_offset += name.len();
             data_length += compressed_bytes.len() as u64;
             names.push(name);
             data.extend_from_slice(&compressed_bytes);
+            entries.extend_from_slice(&entry_buf);
         }
 
         header.string_table_offset = header.data_offset + data_length;
 
         header.index_offset = header.string_table_offset + current_name_table_offset as u64;
+        header.index_checksum = xxh3_64(entries.as_slice());
 
         serialize_into(&mut writer, &*header).expect("failed to serialise header");
         writer.write_all(data.as_slice())?;
         for name in names.iter(){
             writer.write_all(name.as_bytes())?;
         }
-        for entry in entries {
-            serialize_into(&mut writer, &entry).expect("failed to serialise entry");
-        }
+        writer.write_all(entries.as_slice()).expect("failed to write entries");
 
         writer.flush()?;
         drop(writer);
@@ -270,6 +276,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_simple_archive(&mut header, "test.alpack").unwrap();
@@ -291,6 +298,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let magic_fail_path = build_simple_archive(&mut magic_fail_header, "fail.alpack").unwrap();
@@ -307,6 +315,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let version_fail_path = build_simple_archive(&mut version_fail_header, "future.alpack").unwrap();
@@ -339,6 +348,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_simple_archive(&mut header, "bad_utf8.alpack").unwrap();
@@ -362,6 +372,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "none_compression.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
@@ -384,6 +395,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "zstd_compression.alpack", Some(word_count), Some(CompressionType::Zstd)).unwrap();
@@ -406,6 +418,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "deflate_compression.alpack", Some(word_count), Some(CompressionType::Deflate)).unwrap();
@@ -428,6 +441,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "lz4_compression.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();
@@ -450,6 +464,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "none_compression_stream.alpack", Some(word_count), Some(CompressionType::None)).unwrap();
@@ -475,6 +490,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "zstd_compression_stream.alpack", Some(word_count), Some(CompressionType::Zstd)).unwrap();
@@ -500,6 +516,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "deflate_compression_stream.alpack", Some(word_count), Some(CompressionType::Deflate)).unwrap();
@@ -525,6 +542,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "lz4_compression_stream.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();
@@ -549,6 +567,7 @@ mod tests {
             data_offset: 0,
             string_table_offset: 0,
             index_offset: 0,
+            index_checksum: 0,
             reserved: 0,
         };
         let path = build_test_archive(&mut header, "stream_threaded.alpack", Some(word_count), Some(CompressionType::Lz4)).unwrap();

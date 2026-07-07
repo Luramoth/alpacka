@@ -119,6 +119,7 @@ struct header {
     u64 DataOffset;
     u64 StringTableOffset;
     u64 IndexOffset;
+    u64 IndexChecksum;
     u64 Reserved            [[color("f9f9f9")]];
 };
 
