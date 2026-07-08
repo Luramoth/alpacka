@@ -1,4 +1,11 @@
-﻿use crate::format::{derive_entry_key, CompressionType, EncryptionType, Entry, Header, CIPHERTEXT_CHUNK_SIZE, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
+﻿//! Reads Alpacka archives.
+//!
+//! Per-entry data is processed in a fixed pipeline: on write, plaintext is compressed, then optionally
+//! encrypted. On read, that's reversed: ciphertext is decrypted first, then decompressed. Encryption uses
+//! ChaCha20-Poly1305 in a chunked STREAM construction, with per-entry sub-key derived via HKDF
+//! from the archive's master key, `Header.archive_salt`, and the entry's name
+
+use crate::format::{derive_entry_key, CompressionType, EncryptionType, Entry, Header, CIPHERTEXT_CHUNK_SIZE, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Cursor};
@@ -18,7 +25,16 @@ pub struct Reader{
 }
 
 impl Reader {
-    /// Creates a new Alpack reader, catalogs all the entries of the archive to be referenced later
+    /// Creates a new Alpack reader, catalogs all the entries of the archive to be referenced later/
+    ///
+    /// `master_key` must match whatever key was used to encrypt the archive's entries at pack time
+    /// the key itself is never stored in the archive. If the archive contains no encrypted entries,
+    /// any value can be stored here, though callers may prefer a fixed/default key for clarity.
+    ///
+    /// #Errors
+    /// Returns an error if the file cant be opened, the header is corrupt or has a unrecognized
+    /// magic number, the archive's format is newer then this crate supports, or the index checksum
+    /// doesn't match.
     pub fn new(path: &Path, master_key: [u8; 32]) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| format!("could not open {}: {}", path.to_str().unwrap().to_string(), e))?;
 
@@ -95,6 +111,15 @@ impl Reader {
         })
     }
 
+    /// Extracts and returns the full decoded contents of the named entry.
+    ///
+    /// Data flows: read ciphertext -> decrypt (if encrypted) -> decompress (if compressed).
+    /// The entire entry is decrypted and decompressed into memory; for large entries where
+    /// memory-bounded access matters, prefer [`Reader::stream`]
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists, the underlying read fails, decryption
+    /// authentication fails (wrong key, tampered data, or wrong entry name), or decompression fails.
     pub fn extract(&self, name: &str) -> Result<Vec<u8>, String> {
         let entry = self.entries.get(name)
             .ok_or_else(|| format!("no such entry: {name}"))?;
@@ -117,6 +142,16 @@ impl Reader {
         Ok(decompressed)
     }
 
+    /// Returns a streaming, memory-bounded reader over the named entry's decoded contents.
+    ///
+    /// Deta flows the same as [`Reader::extract`] (decrypt -> decompress), but ciphertext is read
+    /// and authenticated in fixed-size chunks as the caller reads, rather then buffering the whole
+    /// entry up front.
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists or if constructing the decompressor fails.
+    /// Authentication failures on encrypted entries surface as [`std::io::Error`]s from the returned
+    /// reader's `read` calls, not from this function itself.
     pub fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String> {
         let entry = self.entries.get(name)
             .ok_or_else(|| format!("no such entry: {name}"))?;
@@ -160,11 +195,15 @@ impl Reader {
         }
     }
 
+    /// take the u64 (8 byte) value from the entry and turn it into a 7 byte nonce
     fn unpack_nonce(nonce: u64) -> [u8; 7] {
         let bytes = nonce.to_le_bytes();
         bytes[..7].try_into().expect("slice is exactly 7 bytes")
     }
 
+    /// Decrypts `ciphertext` for the given entry, if it's encrypted. Chunks ciphertext according to
+    /// `CIPHERTEXT_CHUNK_SIZE` and authentication each chunk against `name` as associated data -
+    /// swapping ciphertext between two differently-named entries will fail authentication.
     fn decrypt_entry(&self, name: &str, entry: &Entry, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
         match entry.encryption_type {
             EncryptionType::None => Ok(ciphertext.to_vec()),
@@ -220,6 +259,10 @@ impl<'a> Read for BoundedPositionedReader<'a> {
     }
 }
 
+/// A `read` adapter that decrypts ciphertext from `inner` in fixed-size chunks as bytes are requested,
+/// rather than buffering the whole entry. `decryptor` becomes `None` once the final chunk has been
+/// authenticated via `decrypt_last`, which naturally signals end-of-stream on subsequent `read` calls
+/// without needing a separate "finish" flag.
 struct DecryptingReader<R: Read> {
     inner: R,
     decryptor: Option<DecryptorBE32<ChaCha20Poly1305>>,
