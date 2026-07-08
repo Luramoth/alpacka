@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn stream_extracts_lz4_chacha20poly1305_successfully() {
-        let word_count: usize = 30;
+        let word_count: usize = 300000;
 
         let mut header = Header {
             magic: MAGIC_NUMBER,
@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     fn extract_extracts_encrypted_lz4_successfully() {
-        let word_count: usize = 30;
+        let word_count: usize = 300000;
 
         let mut header = Header {
             magic: MAGIC_NUMBER,
@@ -864,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_fails_on_tampered_siphertext() {
+    fn extract_fails_on_tampered_ciphertext() {
         let word_count: usize = 30;
 
         let mut header = Header {
