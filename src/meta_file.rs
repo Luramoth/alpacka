@@ -16,6 +16,7 @@ pub struct Meta {
 pub struct Pack{
     pub compression: String,
     pub force_compression: bool,
+    pub encrypted: bool,
 }
 
 impl Default for Meta {
@@ -31,6 +32,7 @@ impl Default for Pack {
         Pack {
             compression: "zstd".to_string(),
             force_compression: false,
+            encrypted: true,
         }
     }
 }
@@ -71,35 +73,35 @@ mod tests {
 
     #[test]
     fn get_compression_type_returns_none() {
-        let none = Meta {pack: Pack{ compression: "none".to_string(), force_compression: false}};
+        let none = Meta {pack: Pack{ compression: "none".to_string(), force_compression: false, encrypted: true}};
 
         assert_eq!(none.get_compression_type(), CompressionType::None);
     }
 
     #[test]
     fn get_compression_type_returns_deflate() {
-        let deflate = Meta {pack: Pack{ compression: "deflate".to_string(), force_compression: false}};
+        let deflate = Meta {pack: Pack{ compression: "deflate".to_string(), force_compression: false, encrypted: true}};
 
         assert_eq!(deflate.get_compression_type(), CompressionType::Deflate);
     }
 
     #[test]
     fn get_compression_type_returns_lz4() {
-        let lz4 = Meta {pack: Pack{ compression: "lz4".to_string(), force_compression: false}};
+        let lz4 = Meta {pack: Pack{ compression: "lz4".to_string(), force_compression: false, encrypted: true}};
 
         assert_eq!(lz4.get_compression_type(), CompressionType::Lz4);
     }
 
     #[test]
     fn get_compression_type_returns_zstd() {
-        let zstd = Meta {pack: Pack{ compression: "zstd".to_string(), force_compression: false}};
+        let zstd = Meta {pack: Pack{ compression: "zstd".to_string(), force_compression: false, encrypted: true}};
 
         assert_eq!(zstd.get_compression_type(), CompressionType::Zstd);
     }
 
     #[test]
     fn get_compression_type_returns_zstd_fallback() {
-        let fake = Meta {pack: Pack{ compression: "fake".to_string(), force_compression: false}};
+        let fake = Meta {pack: Pack{ compression: "fake".to_string(), force_compression: false, encrypted: true}};
 
         assert_eq!(fake.get_compression_type(), CompressionType::Zstd);
     }
@@ -111,7 +113,8 @@ mod tests {
         let temp_path = temp_dir.as_path().join("file.meta.toml");
         let content = r#"[Pack]
         Compression = "deflate"
-        ForceCompression = true"#;
+        ForceCompression = true
+        Encrypted = false"#;
 
         fs::write(&temp_path, content).unwrap();
 
@@ -119,6 +122,7 @@ mod tests {
 
         assert_eq!(meta.pack.compression, "deflate");
         assert_eq!(meta.pack.force_compression, true);
+        assert_eq!(meta.pack.encrypted, false);
 
         assert_eq!(meta.get_compression_type(), CompressionType::Deflate);
     }
@@ -129,6 +133,7 @@ mod tests {
 
         assert_eq!(fake_meta.pack.compression, "zstd");
         assert_eq!(fake_meta.pack.force_compression, false);
+        assert_eq!(fake_meta.pack.encrypted, true);
     }
 
     #[test]
@@ -138,7 +143,8 @@ mod tests {
         let temp_path = temp_dir.as_path().join("broken.meta.toml");
         let content = r#"[Pack]
         Compression = "fake"
-        ForceCompression = wont work"#;
+        ForceCompression = wont work
+        Encrypted = dont feel like it"#;
 
         fs::write(&temp_path, content).unwrap();
 
@@ -146,6 +152,7 @@ mod tests {
 
         assert_eq!(broken_meta.pack.compression, "zstd");
         assert_eq!(broken_meta.pack.force_compression, false);
+        assert_eq!(broken_meta.pack.encrypted, true);
     }
 
     #[test]
@@ -162,7 +169,9 @@ mod tests {
 
         assert_eq!(broken_meta.pack.compression, "lz4");
         assert_eq!(broken_meta.pack.force_compression, false);
+        assert_eq!(broken_meta.pack.encrypted, true);
     }
+
     #[test]
     fn load_or_default_gives_default_on_force_compression_only_file() {
         let temp_dir = temp_dir();
@@ -177,5 +186,23 @@ mod tests {
 
         assert_eq!(broken_meta.pack.compression, "zstd");
         assert_eq!(broken_meta.pack.force_compression, true);
+        assert_eq!(broken_meta.pack.encrypted, true);
+    }
+
+    #[test]
+    fn load_or_default_gives_default_on_encryption_only_file() {
+        let temp_dir = temp_dir();
+
+        let temp_path = temp_dir.as_path().join("encryption.meta.toml");
+        let content = r#"[Pack]
+        Encrypted = false"#;
+
+        fs::write(&temp_path, content).unwrap();
+
+        let broken_meta: Meta = load_or_default(&temp_path);
+
+        assert_eq!(broken_meta.pack.compression, "zstd");
+        assert_eq!(broken_meta.pack.force_compression, false);
+        assert_eq!(broken_meta.pack.encrypted, false);
     }
 }
