@@ -15,6 +15,7 @@ use aead_stream::DecryptorBE32;
 use chacha20poly1305::aead::Payload;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use positioned_io::ReadAt;
+use tempfile::Builder;
 use xxhash_rust::xxh3::xxh3_64;
 
 pub struct Reader{
@@ -186,6 +187,50 @@ impl Reader {
         Self::decompressor(reader, entry.compression_type)
     }
 
+    /// Extracts the named entry's fully decoded contents into a new temporary file on disk, and
+    /// returns its path. Useful for handing data to frameworks that expect a file path rather than
+    /// an in-memory buffer.
+    ///
+    /// Data is streamed via [`Reader::stream`] rather than buffered in memory first, so memory use
+    /// stays bounded even for large entries. The temp file's extension is preserved from the entry's
+    /// name, so consumers that infer the file type from extension (common in C-style asset loaders)
+    /// behave correctly.
+    ///
+    /// The returned [`tempfile::TempPath`] deletes the underlying file automatically when dropped,
+    /// keep it alive for as long as the receiving framework needs the file to exist on the disk.
+    ///
+    /// ### Note:
+    /// the temp file location is OS-dependent (`std::env::temp_dir()`). Some
+    /// systems run periodic cleanup jobs that remove old files from this directory,
+    /// if one runs while this file is still in use, it could be deleted out from
+    /// under the caller. In practice this is a rare, edge-case risk, since these
+    /// cleanup jobs typically only target files that have sat untouched for a long
+    /// time (hours to days), well beyond the lifetime of a typical asset-loading call.
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists, temp file creation fails, or the underlying
+    /// stream read/decrypt/decompress fails partway through (in which case the partially-written temp
+    /// file is cleaned up automatically).
+    pub fn extract_to_temp_file(&self, name: &str) -> Result<tempfile::TempPath, String> {
+        let mut source = self.stream(name)?;
+
+        let extension = Path::new(name)
+            .extension()
+            .and_then(|ext| {ext.to_str()})
+            .unwrap_or("");
+
+        let mut temp_file = Builder::new()
+            .prefix("alpacka_")
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .map_err(|e| format!("failed to write temp file for {name}: {e}"))?;
+
+        std::io::copy(&mut source, temp_file.as_file_mut())
+            .map_err(|e| format!("failed to write temp file fo {name}: {e}"))?;
+
+        Ok(temp_file.into_temp_path())
+    }
+
     fn decompressor<'a, R: Read + Send +'a>( source: R, compression_type: CompressionType ) -> Result<Box<dyn Read + Send + 'a>, String> {
         match compression_type {
             CompressionType::None => Ok(Box::new(source)),
@@ -304,6 +349,7 @@ impl<R: Read> Read for DecryptingReader<R> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::read_to_string;
     use super::*;
     use crate::format::{CompressionType, EncryptionType, CHUNK_SIZE};
     use lipsum::lipsum;
@@ -890,6 +936,35 @@ mod tests {
     }
 
     #[test]
+    fn stream_fails_on_tampered_ciphertext() {
+        let word_count: usize = 30;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            index_checksum: 0,
+            archive_salt: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "tampered_stream_encryption.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        let flip_offset = header.data_offset as usize;
+        bytes[flip_offset] ^= 0xff;
+        std::fs::write(&path, bytes).unwrap();
+
+        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let mut stream = reader.stream("fake/file.0").unwrap();
+
+        let mut bytes = Vec::new();
+        assert!(stream.read_to_end(&mut bytes).is_err());
+    }
+
+    #[test]
     fn extract_extracts_encrypted_lz4_short_data_successfully() {
         let word_count: usize = 1; // less than 16 bytes?
 
@@ -909,6 +984,30 @@ mod tests {
         let reader = Reader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
+
+        assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn extract_to_temp_file_extracts_encrypted_lz4_short_data_successfully() {
+        let word_count: usize = 100;
+
+        let mut header = Header {
+            magic: MAGIC_NUMBER,
+            version: VERSION,
+            entry_count: 1,
+            data_offset: 0,
+            string_table_offset: 0,
+            index_offset: 0,
+            index_checksum: 0,
+            archive_salt: 0,
+            reserved: 0,
+        };
+        let path = build_test_archive(&mut header, "lz4_temp_extract.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
+
+        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let temp_path = reader.extract_to_temp_file("fake/file.0").unwrap();
+        let text = read_to_string(temp_path).unwrap();
 
         assert_eq!(text, lipsum(word_count))
     }
