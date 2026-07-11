@@ -19,13 +19,14 @@ use tempfile::Builder;
 use xxhash_rust::xxh3::xxh3_64;
 
 pub struct Reader{
+pub struct AlpackReader {
     pub header: Header,
     file: File,
     entries: HashMap<String, Entry>,
     master_key: [u8; 32],
 }
 
-impl Reader {
+impl AlpackReader {
     /// Creates a new Alpack reader, catalogs all the entries of the archive to be referenced later/
     ///
     /// `master_key` must match whatever key was used to encrypt the archive's entries at pack time
@@ -511,7 +512,7 @@ mod tests {
         };
         let path = build_simple_archive(&mut header, "test.alpack").unwrap();
 
-        let reader = Reader::new(path.as_path(), TEST_KEY).unwrap();
+        let reader = AlpackReader::new(path.as_path(), TEST_KEY).unwrap();
 
         assert_eq!(reader.header.magic, MAGIC_NUMBER);
         assert_eq!(reader.header.version, VERSION);
@@ -534,7 +535,7 @@ mod tests {
         };
         let magic_fail_path = build_simple_archive(&mut magic_fail_header, "fail.alpack").unwrap();
 
-        assert!(Reader::new(magic_fail_path.as_path(), TEST_KEY).is_err());
+        assert!(AlpackReader::new(magic_fail_path.as_path(), TEST_KEY).is_err());
     }
 
     #[test]
@@ -552,14 +553,14 @@ mod tests {
         };
         let version_fail_path = build_simple_archive(&mut version_fail_header, "future.alpack").unwrap();
 
-        assert!(Reader::new(version_fail_path.as_path(), TEST_KEY).is_err());
+        assert!(AlpackReader::new(version_fail_path.as_path(), TEST_KEY).is_err());
     }
 
     #[test]
     fn reader_constructor_fails_missing_file() {
         let path = Path::new("/this/does/not/exist.alpack");
 
-        assert!(Reader::new(path, TEST_KEY).is_err());
+        assert!(AlpackReader::new(path, TEST_KEY).is_err());
     }
 
     #[test]
@@ -568,7 +569,7 @@ mod tests {
 
         std::fs::write(&path, [0u8; 10]).unwrap();
 
-        assert!(Reader::new(&path, TEST_KEY).is_err());
+        assert!(AlpackReader::new(&path, TEST_KEY).is_err());
     }
 
     #[test]
@@ -590,7 +591,7 @@ mod tests {
         bytes[header.string_table_offset as usize] = 0x80; // invalid UTF-8 lead byte
         std::fs::write(&path, bytes).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         assert!(reader.entries.is_empty())
     }
 
@@ -611,7 +612,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "none_compression.alpack", Some(word_count), Some(CompressionType::None), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -635,7 +636,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "zstd_compression.alpack", Some(word_count), Some(CompressionType::Zstd), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -659,7 +660,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "deflate_compression.alpack", Some(word_count), Some(CompressionType::Deflate), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -683,7 +684,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_compression.alpack", Some(word_count), Some(CompressionType::Lz4), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -707,7 +708,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "none_compression_stream.alpack", Some(word_count), Some(CompressionType::None), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -734,7 +735,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "zstd_compression_stream.alpack", Some(word_count), Some(CompressionType::Zstd), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -761,7 +762,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "deflate_compression_stream.alpack", Some(word_count), Some(CompressionType::Deflate), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -788,7 +789,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_compression_stream.alpack", Some(word_count), Some(CompressionType::Lz4), false).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -814,7 +815,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "stream_threaded.alpack", Some(word_count), Some(CompressionType::Lz4), false).unwrap();
 
-        let reader = Arc::new(Reader::new(&path, TEST_KEY).unwrap());
+        let reader = Arc::new(AlpackReader::new(&path, TEST_KEY).unwrap());
         let reader_clone = Arc::clone(&reader);
 
         let handle = thread::spawn(move || {
@@ -845,7 +846,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_chacha20poly1305_stream.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -871,7 +872,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "stream_threaded_encrypted.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
 
-        let reader = Arc::new(Reader::new(&path, TEST_KEY).unwrap());
+        let reader = Arc::new(AlpackReader::new(&path, TEST_KEY).unwrap());
         let reader_clone = Arc::clone(&reader);
 
         let handle = thread::spawn(move || {
@@ -902,7 +903,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_encryption.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -931,7 +932,7 @@ mod tests {
         bytes[flip_offset] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         assert!(reader.extract("fake/file.0").is_err());
     }
 
@@ -957,7 +958,7 @@ mod tests {
         bytes[flip_offset] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let mut stream = reader.stream("fake/file.0").unwrap();
 
         let mut bytes = Vec::new();
@@ -981,7 +982,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_short_encryption.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let bytes = reader.extract("fake/file.0").unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
@@ -1005,7 +1006,7 @@ mod tests {
         };
         let path = build_test_archive(&mut header, "lz4_temp_extract.alpack", Some(word_count), Some(CompressionType::Lz4), true).unwrap();
 
-        let reader = Reader::new(&path, TEST_KEY).unwrap();
+        let reader = AlpackReader::new(&path, TEST_KEY).unwrap();
         let temp_path = reader.extract_to_temp_file("fake/file.0").unwrap();
         let text = read_to_string(temp_path).unwrap();
 
