@@ -367,7 +367,7 @@ impl<W: Write> EncryptLayer<W> {
 mod tests {
     use std::fs;
     use tempfile::env::temp_dir;
-    use crate::reader::Reader;
+    use crate::reader::AlpackReader;
     use super::*;
 
     const TEST_KEY: [u8; 32] = *b"testtesttesttesttesttesttesttest";
@@ -389,7 +389,119 @@ mod tests {
         writer.add(&file_path, CompressionType::None, false, 0, 0).unwrap();
         writer.finalise().unwrap();
 
-        let reader = Reader::new(&archive_path, TEST_KEY).unwrap();
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_encrypted() {
+        let root = scratch_dir("writer_encrypted");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::None, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_encrypted_deflate() {
+        let root = scratch_dir("writer_encrypted_deflate");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Deflate, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_plain_deflate() {
+        let root = scratch_dir("writer_plain_deflate");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Deflate, false, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_encrypted_zstd() {
+        let root = scratch_dir("writer_encrypted_zstd");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Zstd, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_plain_zstd() {
+        let root = scratch_dir("writer_plain_zstd");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Zstd, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_encrypted_lz4() {
+        let root = scratch_dir("writer_encrypted_lz4");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Lz4, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = reader.extract("hello.txt").unwrap();
+        assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_plain_lz4() {
+        let root = scratch_dir("writer_plain_lz4");
+        let file_path = root.join("hello.txt");
+        fs::write(&file_path, b"Hello, World!").unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Lz4, false, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
         let data = reader.extract("hello.txt").unwrap();
         assert_eq!(data, b"Hello, World!")
     }
