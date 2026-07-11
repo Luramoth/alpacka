@@ -5,20 +5,28 @@
 //! ChaCha20-Poly1305 in a chunked STREAM construction, with per-entry sub-key derived via HKDF
 //! from the archive's master key, `Header.archive_salt`, and the entry's name
 
+use std::io::Write;
 use crate::format::{derive_entry_key, CompressionType, EncryptionType, Entry, Header, CIPHERTEXT_CHUNK_SIZE, ENTRY_SIZE, HEADER_SIZE, MAGIC_NUMBER, VERSION};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom, Cursor};
-use std::path::Path;
+use std::io::{BufReader, Read, Seek, SeekFrom, Cursor, BufWriter};
+use std::path::{Path, PathBuf};
 use std::string::String;
+use std::sync::Mutex;
+use std::time::Instant;
 use aead_stream::DecryptorBE32;
 use chacha20poly1305::aead::Payload;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use positioned_io::ReadAt;
-use tempfile::Builder;
+use tempfile::{Builder, TempPath};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub struct Reader{
+pub trait AssetAccessor {
+    fn extract(&self, name: &str) -> Result<Vec<u8>, String>;
+    fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String>;
+    fn extract_to_temp_file(&self, name: &str) -> Result<TempPath, String>;
+}
+
 pub struct AlpackReader {
     pub header: Header,
     file: File,
@@ -33,13 +41,28 @@ impl AlpackReader {
     /// the key itself is never stored in the archive. If the archive contains no encrypted entries,
     /// any value can be stored here, though callers may prefer a fixed/default key for clarity.
     ///
-    /// #Errors
-    /// Returns an error if the file cant be opened, the header is corrupt or has a unrecognized
+    /// # Debug
+    /// Returns [`LooseAssetReader`] instead of a [`AlpackReader`] if `ALPACKA_ASSET_ROOT` enviroment
+    /// variable is set.
+    ///
+    /// `ALPACKA_ASSET_ROOT` will use the same API as a AlpackReader however it will instead read raw
+    /// files in the path specified by `ALPACKA_ASSET_ROOT` and mimic the same behavior allowing for
+    /// faster iteration. **THIS IS FOR IN-DEV AND DEBUG, NOT RELEASE.**
+    ///
+    /// # Errors
+    /// Returns an error if the file cant be opened, the header is corrupt or has an unrecognized
     /// magic number, the archive's format is newer then this crate supports, or the index checksum
     /// doesn't match.
-    pub fn new(path: &Path, master_key: [u8; 32]) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("could not open {}: {}", path.to_str().unwrap().to_string(), e))?;
+    pub fn open(path: &Path, master_key: [u8; 32]) -> Result<Box<dyn AssetAccessor>, String> {
+        if std::env::var("ALPACKA_ASSET_ROOT").is_ok() {
+            return Ok(Box::new(LooseAssetReader::new(std::env::var("ALPACKA_ASSET_ROOT").unwrap())?));
+        }
 
+        Ok(Box::new(AlpackReader::new(path, master_key)?))
+    }
+
+    fn new(path: &Path, master_key: [u8; 32]) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("could not open {}: {}", path.to_str().unwrap().to_string(), e))?;
 
         let mut reader = BufReader::new(&file);
 
@@ -105,131 +128,12 @@ impl AlpackReader {
             entries.insert(name, entry);
         }
 
-        Ok (Reader{
+        Ok (AlpackReader {
             header,
             file,
             entries,
             master_key,
         })
-    }
-
-    /// Extracts and returns the full decoded contents of the named entry.
-    ///
-    /// Data flows: read ciphertext -> decrypt (if encrypted) -> decompress (if compressed).
-    /// The entire entry is decrypted and decompressed into memory; for large entries where
-    /// memory-bounded access matters, prefer [`Reader::stream`]
-    ///
-    /// # Errors
-    /// Returns an error if no entry with this name exists, the underlying read fails, decryption
-    /// authentication fails (wrong key, tampered data, or wrong entry name), or decompression fails.
-    pub fn extract(&self, name: &str) -> Result<Vec<u8>, String> {
-        let entry = self.entries.get(name)
-            .ok_or_else(|| format!("no such entry: {name}"))?;
-
-        let abs_offset = self.header.data_offset + entry.data_offset;
-
-        let mut ciphertext = vec![0u8; entry.compressed_size as usize];
-        self.file
-            .read_exact_at(abs_offset, &mut ciphertext)
-            .map_err(|e| format!("failed to read entry data for {name}: {e}"))?;
-
-        let compressed = self.decrypt_entry(name, entry, &ciphertext)?;
-
-        let mut decoder = Self::decompressor(Cursor::new(compressed), entry.compression_type)?;
-
-        let mut decompressed = Vec::with_capacity(entry.original_size as usize);
-        decoder.read_to_end(&mut decompressed)
-            .map_err(|e| format!("failed to decompress entry {name}: {e}"))?;
-
-        Ok(decompressed)
-    }
-
-    /// Returns a streaming, memory-bounded reader over the named entry's decoded contents.
-    ///
-    /// Deta flows the same as [`Reader::extract`] (decrypt -> decompress), but ciphertext is read
-    /// and authenticated in fixed-size chunks as the caller reads, rather then buffering the whole
-    /// entry up front.
-    ///
-    /// # Errors
-    /// Returns an error if no entry with this name exists or if constructing the decompressor fails.
-    /// Authentication failures on encrypted entries surface as [`std::io::Error`]s from the returned
-    /// reader's `read` calls, not from this function itself.
-    pub fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String> {
-        let entry = self.entries.get(name)
-            .ok_or_else(|| format!("no such entry: {name}"))?;
-
-        let abs_offset = self.header.data_offset + entry.data_offset;
-
-        let bounded = BoundedPositionedReader {
-            file: &self.file,
-            pos: abs_offset,
-            remaining: entry.compressed_size,
-        };
-
-        let reader: Box<dyn Read + Send> = match entry.encryption_type {
-            EncryptionType::None => Box::new(bounded),
-            EncryptionType::ChaCha20Poly1305 => {
-                let subkey = derive_entry_key(&self.master_key, self.header.archive_salt, name);
-                let cipher = ChaCha20Poly1305::new((&subkey).into());
-                let nonce_prefix = Self::unpack_nonce(entry.nonce);
-                let decryptor = DecryptorBE32::from_aead(cipher, (&nonce_prefix).into());
-
-                Box::new(DecryptingReader {
-                    inner: bounded,
-                    decryptor: Some(decryptor),
-                    entry_name: name.as_bytes().to_vec(),
-                    remaining_ciphertext: entry.compressed_size,
-                    plaintext_buf: Vec::new(),
-                    buf_pos: 0,
-                })
-            }
-        };
-
-        Self::decompressor(reader, entry.compression_type)
-    }
-
-    /// Extracts the named entry's fully decoded contents into a new temporary file on disk, and
-    /// returns its path. Useful for handing data to frameworks that expect a file path rather than
-    /// an in-memory buffer.
-    ///
-    /// Data is streamed via [`Reader::stream`] rather than buffered in memory first, so memory use
-    /// stays bounded even for large entries. The temp file's extension is preserved from the entry's
-    /// name, so consumers that infer the file type from extension (common in C-style asset loaders)
-    /// behave correctly.
-    ///
-    /// The returned [`tempfile::TempPath`] deletes the underlying file automatically when dropped,
-    /// keep it alive for as long as the receiving framework needs the file to exist on the disk.
-    ///
-    /// ### Note:
-    /// the temp file location is OS-dependent (`std::env::temp_dir()`). Some
-    /// systems run periodic cleanup jobs that remove old files from this directory,
-    /// if one runs while this file is still in use, it could be deleted out from
-    /// under the caller. In practice this is a rare, edge-case risk, since these
-    /// cleanup jobs typically only target files that have sat untouched for a long
-    /// time (hours to days), well beyond the lifetime of a typical asset-loading call.
-    ///
-    /// # Errors
-    /// Returns an error if no entry with this name exists, temp file creation fails, or the underlying
-    /// stream read/decrypt/decompress fails partway through (in which case the partially-written temp
-    /// file is cleaned up automatically).
-    pub fn extract_to_temp_file(&self, name: &str) -> Result<tempfile::TempPath, String> {
-        let mut source = self.stream(name)?;
-
-        let extension = Path::new(name)
-            .extension()
-            .and_then(|ext| {ext.to_str()})
-            .unwrap_or("");
-
-        let mut temp_file = Builder::new()
-            .prefix("alpacka_")
-            .suffix(&format!(".{extension}"))
-            .tempfile()
-            .map_err(|e| format!("failed to write temp file for {name}: {e}"))?;
-
-        std::io::copy(&mut source, temp_file.as_file_mut())
-            .map_err(|e| format!("failed to write temp file fo {name}: {e}"))?;
-
-        Ok(temp_file.into_temp_path())
     }
 
     fn decompressor<'a, R: Read + Send +'a>( source: R, compression_type: CompressionType ) -> Result<Box<dyn Read + Send + 'a>, String> {
@@ -280,6 +184,206 @@ impl AlpackReader {
                 Ok(plaintext)
             }
         }
+    }
+}
+
+impl AssetAccessor for AlpackReader {
+    /// Extracts and returns the full decoded contents of the named entry.
+    ///
+    /// Data flows: read ciphertext -> decrypt (if encrypted) -> decompress (if compressed).
+    /// The entire entry is decrypted and decompressed into memory; for large entries where
+    /// memory-bounded access matters, prefer [`AlpackReader::stream`]
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists, the underlying read fails, decryption
+    /// authentication fails (wrong key, tampered data, or wrong entry name), or decompression fails.
+    fn extract(&self, name: &str) -> Result<Vec<u8>, String> {
+        let entry = self.entries.get(name)
+            .ok_or_else(|| format!("no such entry: {name}"))?;
+
+        let abs_offset = self.header.data_offset + entry.data_offset;
+
+        let mut ciphertext = vec![0u8; entry.compressed_size as usize];
+        self.file
+            .read_exact_at(abs_offset, &mut ciphertext)
+            .map_err(|e| format!("failed to read entry data for {name}: {e}"))?;
+
+        let compressed = self.decrypt_entry(name, entry, &ciphertext)?;
+
+        let mut decoder = Self::decompressor(Cursor::new(compressed), entry.compression_type)?;
+
+        let mut decompressed = Vec::with_capacity(entry.original_size as usize);
+        decoder.read_to_end(&mut decompressed)
+            .map_err(|e| format!("failed to decompress entry {name}: {e}"))?;
+
+        Ok(decompressed)
+    }
+
+    /// Returns a streaming, memory-bounded reader over the named entry's decoded contents.
+    ///
+    /// Data flows the same as [`AlpackReader::extract`] (decrypt -> decompress), but ciphertext is read
+    /// and authenticated in fixed-size chunks as the caller reads, rather then buffering the whole
+    /// entry up front.
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists or if constructing the decompressor fails.
+    /// Authentication failures on encrypted entries surface as [`std::io::Error`]s from the returned
+    /// reader's `read` calls, not from this function itself.
+    fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String> {
+        let entry = self.entries.get(name)
+            .ok_or_else(|| format!("no such entry: {name}"))?;
+
+        let abs_offset = self.header.data_offset + entry.data_offset;
+
+        let bounded = BoundedPositionedReader {
+            file: &self.file,
+            pos: abs_offset,
+            remaining: entry.compressed_size,
+        };
+
+        let reader: Box<dyn Read + Send> = match entry.encryption_type {
+            EncryptionType::None => Box::new(bounded),
+            EncryptionType::ChaCha20Poly1305 => {
+                let subkey = derive_entry_key(&self.master_key, self.header.archive_salt, name);
+                let cipher = ChaCha20Poly1305::new((&subkey).into());
+                let nonce_prefix = Self::unpack_nonce(entry.nonce);
+                let decryptor = DecryptorBE32::from_aead(cipher, (&nonce_prefix).into());
+
+                Box::new(DecryptingReader {
+                    inner: bounded,
+                    decryptor: Some(decryptor),
+                    entry_name: name.as_bytes().to_vec(),
+                    remaining_ciphertext: entry.compressed_size,
+                    plaintext_buf: Vec::new(),
+                    buf_pos: 0,
+                })
+            }
+        };
+
+        Self::decompressor(reader, entry.compression_type)
+    }
+
+    /// Extracts the named entry's fully decoded contents into a new temporary file on disk, and
+    /// returns its path. Useful for handing data to frameworks that expect a file path rather than
+    /// an in-memory buffer.
+    ///
+    /// Data is streamed via [`AlpackReader::stream`] rather than buffered in memory first, so memory use
+    /// stays bounded even for large entries. The temp file's extension is preserved from the entry's
+    /// name, so consumers that infer the file type from extension (common in C-style asset loaders)
+    /// behave correctly.
+    ///
+    /// The returned [`TempPath`] deletes the underlying file automatically when dropped,
+    /// keep it alive for as long as the receiving framework needs the file to exist on the disk.
+    ///
+    /// ### Note:
+    /// the temp file location is OS-dependent (`std::env::temp_dir()`). Some
+    /// systems run periodic cleanup jobs that remove old files from this directory,
+    /// if one runs while this file is still in use, it could be deleted out from
+    /// under the caller. In practice this is a rare, edge-case risk, since these
+    /// cleanup jobs typically only target files that have sat untouched for a long
+    /// time (hours to days), well beyond the lifetime of a typical asset-loading call.
+    ///
+    /// # Errors
+    /// Returns an error if no entry with this name exists, temp file creation fails, or the underlying
+    /// stream read/decrypt/decompress fails partway through (in which case the partially-written temp
+    /// file is cleaned up automatically).
+    fn extract_to_temp_file(&self, name: &str) -> Result<TempPath, String> {
+        let mut source = self.stream(name)?;
+
+        let extension = Path::new(name)
+            .extension()
+            .and_then(|ext| {ext.to_str()})
+            .unwrap_or("");
+
+        let mut temp_file = Builder::new()
+            .prefix("alpacka_")
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .map_err(|e| format!("failed to write temp file for {name}: {e}"))?;
+
+        std::io::copy(&mut source, temp_file.as_file_mut())
+            .map_err(|e| format!("failed to write temp file fo {name}: {e}"))?;
+
+
+
+        Ok(temp_file.into_temp_path())
+    }
+}
+
+pub struct LooseAssetReader {
+    asset_root: PathBuf,
+    access_log: Mutex<BufWriter<File>>,
+    start_time: Instant,
+}
+
+impl LooseAssetReader {
+    pub fn new(asset_root: String) -> Result<Self, String> {
+        println!("Alpacka: emulating alpack file for debug.");
+
+        let log_path = std::env::current_dir()
+            .map_err(|e| format!("failed to get current dir: {e}"))?
+            .join("alpacka/access_log.txt");
+
+        if let Some(parent) = log_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create log director: {}: {e}", parent.display()))?;
+        }
+
+        let log_file = File::create(&log_path)
+            .map_err(|e| format!("failed to create log file {}: {e}", log_path.display()))?;
+
+        Ok(LooseAssetReader {
+            asset_root: PathBuf::from(asset_root),
+            access_log: Mutex::new(BufWriter::new(log_file)),
+            start_time: Instant::now(),
+        })
+    }
+
+    fn log_access(&self, name: &str, access_type: &str) {
+        let elapsed = self.start_time.elapsed();
+        if let Ok(mut writer) = self.access_log.lock() {
+            let _ = writeln!(writer, "{:.3}\t{}\t{}", elapsed.as_secs_f64(), access_type, name);
+        }
+    }
+}
+
+impl AssetAccessor for LooseAssetReader {
+    fn extract(&self, name: &str) -> Result<Vec<u8>, String> {
+        self.log_access(name, "extract");
+        std::fs::read(self.asset_root.join(name))
+            .map_err(|e| format!("failed to read {name}: {e}"))
+    }
+
+    fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, String> {
+        self.log_access(name, "stream");
+        let file = File::open(self.asset_root.join(name))
+            .map_err(|e| format!("failed to open {name}: {e}"))?;
+        Ok(Box::new(file))
+    }
+
+    fn extract_to_temp_file(&self, name: &str) -> Result<TempPath, String> {
+        self.log_access(name, "extract_to_temp_file");
+
+        let mut source = Box::new(File::open(self.asset_root.join(name))
+            .map_err(|e| format!("failed to open file {name}: {e}"))?);
+
+        let extension = Path::new(name)
+            .extension()
+            .and_then(|ext| {ext.to_str()})
+            .unwrap_or("");
+
+        let mut temp_file = Builder::new()
+            .prefix("alpacka_")
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .map_err(|e| format!("failed to write temp file for {name}: {e}"))?;
+
+        std::io::copy(&mut source, temp_file.as_file_mut())
+            .map_err(|e| format!("failed to write temp file fo {name}: {e}"))?;
+
+
+
+        Ok(temp_file.into_temp_path())
     }
 }
 
@@ -359,7 +463,7 @@ mod tests {
     use std::io::{BufWriter, Error, Write};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::thread;
+    use std::{fs, thread};
     use aead_stream::EncryptorBE32;
     use tempfile::env::temp_dir;
     use wincode::serialize_into;
@@ -408,6 +512,12 @@ mod tests {
                 compressed
             }
         }
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = temp_dir().join(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     fn build_test_archive(
@@ -1011,5 +1121,43 @@ mod tests {
         let text = read_to_string(temp_path).unwrap();
 
         assert_eq!(text, lipsum(word_count))
+    }
+
+    #[test]
+    fn loose_asset_loader_extracts() {
+        let root = scratch_dir("reader_root_loose_extract");
+        let file_path = root.join("extract.txt");
+        fs::write(&file_path, b"loose extract").unwrap();
+
+        let reader = LooseAssetReader::new(root.to_str().unwrap().to_string()).unwrap();
+
+        assert_eq!(reader.extract("extract.txt").unwrap(), b"loose extract")
+    }
+
+    #[test]
+    fn loose_asset_loader_streams() {
+        let root = scratch_dir("reader_root_loose_stream");
+        let file_path = root.join("stream.txt");
+        fs::write(&file_path, b"loose stream").unwrap();
+
+        let reader = LooseAssetReader::new(root.to_str().unwrap().to_string()).unwrap();
+        let mut content_buf = Vec::new();
+        reader.stream("stream.txt").unwrap().read_to_end(&mut content_buf).unwrap();
+
+        assert_eq!(content_buf, b"loose stream")
+    }
+
+    #[test]
+    fn loose_asset_loader_extracts_to_temp_file() {
+        let root = scratch_dir("reader_root_loose_temp_file");
+        let file_path = root.join("tempfile.txt");
+        fs::write(&file_path, b"loose tempfile").unwrap();
+
+        let reader = LooseAssetReader::new(root.to_str().unwrap().to_string()).unwrap();
+        let mut content_buf = Vec::new();
+        let mut file = File::open(reader.extract_to_temp_file("tempfile.txt").unwrap()).unwrap();
+        file.read_to_end(&mut content_buf).unwrap();
+
+        assert_eq!(content_buf, b"loose tempfile")
     }
 }
