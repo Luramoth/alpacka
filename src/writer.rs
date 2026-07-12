@@ -366,7 +366,9 @@ impl<W: Write> EncryptLayer<W> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use lipsum::lipsum;
     use tempfile::env::temp_dir;
+    use pretty_assertions::assert_eq;
     use crate::reader::AlpackReader;
     use super::*;
 
@@ -504,5 +506,46 @@ mod tests {
         let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
         let data = reader.extract("hello.txt").unwrap();
         assert_eq!(data, b"Hello, World!")
+    }
+
+    #[test]
+    fn round_trip_single_file_large() {
+        let root = scratch_dir("writer_large");
+        let file_path = root.join("hello.txt");
+        let content = lipsum(300000);
+        fs::write(&file_path, &content).unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Lz4, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = String::from_utf8(reader.extract("hello.txt").unwrap()).unwrap();
+        assert_eq!(data, content)
+    }
+
+    #[test]
+    fn round_trip_single_file_meta() {
+        let root = scratch_dir("writer_meta");
+        let file_path = root.join("hello.txt");
+        let content = lipsum(30);
+        fs::write(&file_path, &content).unwrap();
+
+        let meta_file_path = root.join("hello.txt.meta.toml");
+        let meta_content = r#"[Pack]
+        Compression = "deflate"
+        Encrypted = false"#;
+
+        fs::write(&meta_file_path, meta_content).unwrap();
+
+        let archive_path = root.join("archive.alpack");
+        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        writer.add(&file_path, CompressionType::Lz4, true, 0, 0).unwrap();
+        writer.finalise().unwrap();
+
+        let reader = AlpackReader::open(&archive_path, TEST_KEY).unwrap();
+        let data = String::from_utf8(reader.extract("hello.txt").unwrap()).unwrap();
+        assert_eq!(data, content)
     }
 }
