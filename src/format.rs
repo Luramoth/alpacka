@@ -67,7 +67,7 @@ pub const CIPHERTEXT_CHUNK_SIZE: usize = CHUNK_SIZE + TAG_SIZE;
 #[repr(u64)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone, SchemaWrite, SchemaRead)]
 #[wincode(tag_encoding = "u64")]
-pub enum CompressionType{
+pub enum CompressionType {
     /// No compression
     None = 0,
     /// Z-Standard compression, decent speed and compression
@@ -107,7 +107,7 @@ pub enum EncryptionType {
 /// | 64      | 8    | `reserved`            | `u64`             |
 ///
 /// Total size: 72 bytes ([`HEADER_SIZE`]). Always located at file offset 0.
-#[derive(SchemaWrite, SchemaRead)]
+#[derive(SchemaWrite, SchemaRead, Debug)]
 pub struct Header {
     /// Number that identifies this file as a valid Alpacka file "ALPK"
     pub magic: u64,
@@ -156,7 +156,7 @@ pub struct Header {
 /// | 80     | 8    | `reserved`          | `u64`                        |
 ///
 /// Total size: 88 bytes ([`ENTRY_SIZE`]).
-#[derive(SchemaWrite, SchemaRead)]
+#[derive(SchemaWrite, SchemaRead, Debug)]
 pub struct Entry {
     /// 64 bits reserved for custom data set by the packager or preprocessor
     pub custom1: u64,
@@ -193,13 +193,14 @@ pub struct Entry {
 /// - `master_key` -- supplied externally by the engine at runtime; never stored in the archive itself.
 /// - `archive_salt` -- see [`Header::archive_salt`].
 /// - `entry_name` -- the entry's full path as stored in the string table.
-pub fn derive_entry_key(master_key: &[u8; 32], archive_salt: u64 , entry_name: &str) -> [u8; 32] {
+pub fn derive_entry_key(master_key: &[u8; 32], archive_salt: u64, entry_name: &str) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(None, master_key);
     let mut info = Vec::with_capacity(8 + entry_name.len());
     info.extend_from_slice(&archive_salt.to_le_bytes());
     info.extend_from_slice(entry_name.as_bytes());
 
     let mut subkey = [0u8; 32];
-    hk.expand(&info, &mut subkey).expect("32 bytes is a valid HKDF output length");
+    hk.expand(&info, &mut subkey)
+        .expect("32 bytes is a valid HKDF output length");
     subkey
 }
