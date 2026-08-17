@@ -12,7 +12,7 @@ lz4 = "1.28.1"
 toml = "1.1.2"
 zstd = "0.13.3"
 serde = { version = "1.0.228", features = ["derive"] }
-wincode = { version = "0.5.5", features = ["derive"] }
+wincode = { version = "0.6.1", features = ["derive"] }
 flate2 = "1.1.9"
 positioned-io = "0.3.5"
 xxhash-rust = { version = "0.8.16", features = ["xxh3"] }
