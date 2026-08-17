@@ -7,4 +7,5 @@ producing corrupted reads without any error. Building for 32-bit targets is unsu
 pub mod format;
 pub mod meta_file;
 pub mod reader;
+#[cfg(feature = "writer")]
 pub mod writer;
