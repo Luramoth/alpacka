@@ -3,7 +3,7 @@
 //! # Layout
 //! An archive is laid out as four contiguous sections, in this order:
 //! `[header][data][string table][index]`
-//! all multi-byte integers are little-endian
+//! all multibyte integers are little-endian
 //!
 //! - **header** -- fixed size [`Header`], always offset 0.
 //! - **data** -- the concatenated bytes of every entry, each optionally compressed and/or encrypted.
@@ -28,7 +28,7 @@
 //!   Reader.extract("shaders/explosion.frag")
 //!   ```
 //! - While an open standard, Alpacka is also meant to be very tight-knit and purpose built for game
-//!   asset storage. meaning that i wish not for this format to be bloated with all different kinds
+//!   asset storage. meaning that I wish not for this format to be bloated with all different kinds
 //!   of standards and encoders. **Alpacka is not just a container.** So please, to any future or
 //!   current contributors, keep the format clean.
 
@@ -83,7 +83,7 @@ pub enum CompressionType {
 #[derive(Debug, PartialEq, Eq, Copy, Clone, SchemaWrite, SchemaRead)]
 #[wincode(tag_encoding = "u64")]
 pub enum EncryptionType {
-    /// no encryption - data is stored in plain (but possibley compressed) bytes
+    /// no encryption - data is stored in plain (but possibly compressed) bytes
     None = 0,
     /// ChaCha20-Poly1305 authenticated encryption, applied in fixed-size chunks
     /// via a STREAM construction (see `CIPHERTEXT_CHUNK_SIZE`)

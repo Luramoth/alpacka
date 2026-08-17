@@ -5,7 +5,9 @@
       <w>Alpacker</w>
       <w>alpacka</w>
       <w>chacha</w>
+      <w>tempfile</w>
       <w>testtesttesttesttesttesttesttest</w>
+      <w>xxhash</w>
     </words>
   </dictionary>
 </component>
