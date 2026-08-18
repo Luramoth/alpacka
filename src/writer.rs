@@ -377,7 +377,7 @@ impl<W: Write> Write for CountingWriter<W> {
     }
 }
 
-///Internal marker embedded in an `io::Error` when chunk encryption fails inside of [`ChunkedEncryptWriter`].
+///Internal marker embedded in an `io::Error` when chunk encryption fails inside [`ChunkedEncryptWriter`].
 /// lets callers distinguish between an encryption failure and any other `io::Error` that might surface in the
 /// `write` chain since nothing using `Write::write`/`flush` can directly return a [`WriterError`]
 #[derive(Debug)]
@@ -475,6 +475,7 @@ impl<W: Write> EncryptLayer<W> {
     }
 }
 
+#[cfg(feature = "reader")]
 #[cfg(test)]
 mod tests {
     use super::*;
