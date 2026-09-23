@@ -58,3 +58,7 @@ reader = [
     "dep:rand",
     "dep:tempfile"
 ]
+packager_api = []
+preprocessor_api = [
+    "dep:tempfile"
+]
