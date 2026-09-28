@@ -44,7 +44,7 @@ pub enum WriterError {
 }
 
 #[derive(Debug)]
-pub struct Writer {
+pub struct AlpackWriter {
     output_path: PathBuf,
     asset_root: PathBuf,
     master_key: [u8; 32],
@@ -64,9 +64,9 @@ struct PendingEntry {
     custom2: u64,
 }
 
-impl Writer {
+impl AlpackWriter {
     pub fn new(output_path: &Path, asset_root: &Path, master_key: [u8; 32]) -> Self {
-        Writer {
+        AlpackWriter {
             output_path: output_path.to_path_buf(),
             asset_root: asset_root.to_path_buf(),
             master_key,
@@ -500,7 +500,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::None, false, 0, 0)
             .unwrap();
@@ -518,7 +518,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::None, true, 0, 0)
             .unwrap();
@@ -536,7 +536,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Deflate, true, 0, 0)
             .unwrap();
@@ -554,7 +554,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Deflate, false, 0, 0)
             .unwrap();
@@ -572,7 +572,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Zstd, true, 0, 0)
             .unwrap();
@@ -590,7 +590,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Zstd, true, 0, 0)
             .unwrap();
@@ -608,7 +608,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Lz4, true, 0, 0)
             .unwrap();
@@ -626,7 +626,7 @@ mod tests {
         fs::write(&file_path, b"Hello, World!").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Lz4, false, 0, 0)
             .unwrap();
@@ -645,7 +645,7 @@ mod tests {
         fs::write(&file_path, &content).unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Lz4, true, 0, 0)
             .unwrap();
@@ -671,7 +671,7 @@ mod tests {
         fs::write(&meta_file_path, meta_content).unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         writer
             .add(&file_path, CompressionType::Lz4, true, 0, 0)
             .unwrap();
@@ -689,7 +689,7 @@ mod tests {
         fs::write(&outside, b"x").unwrap();
 
         let archive_path = root.join("archive.alpack");
-        let mut writer = Writer::new(&archive_path, &root, TEST_KEY);
+        let mut writer = AlpackWriter::new(&archive_path, &root, TEST_KEY);
         let result = writer.add(&outside, CompressionType::None, false, 0, 0);
 
         assert!(matches!(result, Err(WriterError::NotInRoot { .. })))

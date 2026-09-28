@@ -152,7 +152,7 @@ mod tests {
     use super::*;
     use crate::format::CompressionType;
     use crate::reader::AlpackReader;
-    use crate::writer::Writer;
+    use crate::writer::AlpackWriter;
     use pretty_assertions::{assert_eq, assert_ne};
     use std::fs;
     use tempfile::env::temp_dir;
@@ -405,7 +405,7 @@ mod tests {
         // (this assumes that the previous step is not a required part of the build)
         let step3 = step2.derive_surrogate_from_root().unwrap();
 
-        let mut writer = Writer::new(&project.join("archive.alpack"), &step3.path, TEST_KEY);
+        let mut writer = AlpackWriter::new(&project.join("archive.alpack"), &step3.path, TEST_KEY);
 
         // walk through ad add all files in the final step directory
         let mut stack = vec![PathBuf::new()];
