@@ -1,3 +1,4 @@
 ﻿[alias]
 cov = "llvm-cov --ignore-filename-regex format\\.rs$ --features reader,writer,packager_api,preprocessor_api"
 cov-html = "llvm-cov --html --open --ignore-filename-regex format\\.rs$ --features reader,writer,packager_api,preprocessor_api"
+docu = "doc --open --features reader,writer,packager_api,preprocessor_api"

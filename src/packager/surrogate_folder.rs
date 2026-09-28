@@ -3,13 +3,40 @@ use std::fs::remove_dir_all;
 use std::path::{Path, PathBuf};
 use tempfile::Builder;
 
-struct SurrogateFolder {
+/// Surrogate folders are a part of the Packager API with the intent that they would allow for
+/// non-destructive automatic asset editing through the preprocessor API. the APi was designed to
+/// allow the use of multiple preprocessors in a stack (ex: lightmapper -> mipmapper -> occlusion_baker)
+///
+/// The idea is first a packer will clear the previous surrogate root ".alpacka_surrogates/"
+/// [`SurrogateFolder::clean_stale_surrogates`].\
+/// Then it will create a new fresh one [`SurrogateFolder::create_surrogate_root`].
+///
+/// Then for every step, using previous example:\
+/// * First step, create the first surrogate for the lightmapper [`SurrogateFolder::new`].\
+/// * Second step, create a new surrogate for the mipmapper [`SurrogateFolder::derive_surrogate_from_self`].\
+/// * Let's say the second step failed, but it was marked as not required, so we decide to skip it
+/// using [`SurrogateFolder::derive_surrogate_from_root`] which will derive a surrogate folder
+/// from the first step's surrogate, meaning any mistakes from the second step aren't carried over to step 3
+///
+///
+/// from there the packager will use the very last step's surrogate folder and use that as an input
+/// for the alpack writer
+pub struct SurrogateFolder {
+    /// Path to the surrogate folder itself
     pub path: PathBuf,
+    /// path to the folder this surrogate is derived from
     pub source_path: PathBuf,
     surrogates_root_path: PathBuf,
 }
 
 impl SurrogateFolder {
+    /// creates a new surrogate folder using provided asset source directory and a place to put the
+    /// actual directory. from here it's recommended to made derivative folders through
+    /// [`SurrogateFolder::derive_surrogate_from_self`] and [`SurrogateFolder::derive_surrogate_from_root`]
+    ///
+    /// # Errors:
+    /// will return an error if for any reason the surrogate folder fails to be created, or if
+    /// mirroring the source directory ever fails
     pub fn new(
         source_path: PathBuf,
         surrogates_root_path: PathBuf,
@@ -30,6 +57,14 @@ impl SurrogateFolder {
         Ok(surrogate)
     }
 
+    /// given the same path ypu presumably gave to [`SurrogateFolder::create_surrogate_root`] it will
+    /// delete the surrogate root and its contents, leaving the actual source content untouched
+    ///
+    /// ## source_path: &PathBuf
+    /// path to the original source folder of your assets (ex: `{PROJECT_ROOT}/Assets/`)
+    ///
+    /// # Errors:
+    /// will return an error if for any reason the folder deletion process fails
     pub fn clean_stale_surrogates(source_path: &PathBuf) -> std::io::Result<()> {
         let staging_dir = source_path
             .parent()
@@ -48,6 +83,13 @@ impl SurrogateFolder {
         }
     }
 
+    /// creates a surrogate root directory to contain the surrogates.
+    ///
+    /// ```text
+    /// Project root folder/
+    /// ├ .alpacka_surrogates/ (created)
+    /// └ source_path/ (parameter)
+    /// ```
     pub fn create_surrogate_root(source_path: &PathBuf) -> std::io::Result<PathBuf> {
         let staging_dir = source_path
             .parent()
@@ -64,10 +106,18 @@ impl SurrogateFolder {
         Ok(staging_dir)
     }
 
+    /// creates a new surrogate folder derived from `this`.
+    ///
+    /// this is to allow packagers the ability to create a new surrogate using this one as a base
+    /// with the intent that it will be used in a non-destructive way to edit `this` step's work.
     pub fn derive_surrogate_from_self(&self) -> std::io::Result<SurrogateFolder> {
         SurrogateFolder::new(self.path.clone(), self.surrogates_root_path.clone())
     }
 
+    /// creates a new surrogate based on `this` surrogat's source folder.
+    ///
+    /// this is to allow packagers to skip `this` step in case the preprocessor fails to do its work
+    /// and will prevent `this` step from inserting corrupted or incomplete fails into the final package.
     pub fn derive_surrogate_from_root(&self) -> std::io::Result<SurrogateFolder> {
         SurrogateFolder::new(self.source_path.clone(), self.surrogates_root_path.clone())
     }
