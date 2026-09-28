@@ -58,7 +58,10 @@ reader = [
     "dep:rand",
     "dep:tempfile"
 ]
-packager_api = []
+packager_api = [
+    "writer",
+    "dep:tempfile"
+]
 preprocessor_api = [
     "dep:tempfile"
 ]
