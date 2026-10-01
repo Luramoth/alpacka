@@ -1,26 +1,30 @@
-﻿use std::fs;
+﻿//! Temporary folders mirroring in a chain starting from root asset folder to the final preprocessor
+//! step.
+//!
+//! Surrogate folders are a part of the Packager API with the intent that they would allow for
+//! non-destructive automatic asset editing through the preprocessor API. the APi was designed to
+//! allow the use of multiple preprocessors in a stack (ex: lightmapper -> mipmapper -> occlusion_baker)
+//!
+//! The idea is first a packer will clear the previous surrogate root ".alpacka_surrogates/"
+//! [`SurrogateFolder::clean_stale_surrogates`].\
+//! Then it will create a new fresh one [`SurrogateFolder::create_surrogate_root`].
+//!
+//! Then for every step, using previous example:\
+//! * First step, create the first surrogate for the lightmapper [`SurrogateFolder::new`].\
+//! * Second step, create a new surrogate for the mipmapper [`SurrogateFolder::derive_surrogate_from_self`].\
+//! * Let's say the second step failed, but it was marked as not required, so we decide to skip it
+//! using [`SurrogateFolder::derive_surrogate_from_root`] which will derive a surrogate folder
+//! from the first step's surrogate, meaning any mistakes from the second step aren't carried over to step 3
+//!
+//!
+//! from there the packager will use the very last step's surrogate folder and use that as an input
+//! for the alpack writer
+
+use std::fs;
 use std::fs::remove_dir_all;
 use std::path::{Path, PathBuf};
 use tempfile::Builder;
 
-/// Surrogate folders are a part of the Packager API with the intent that they would allow for
-/// non-destructive automatic asset editing through the preprocessor API. the APi was designed to
-/// allow the use of multiple preprocessors in a stack (ex: lightmapper -> mipmapper -> occlusion_baker)
-///
-/// The idea is first a packer will clear the previous surrogate root ".alpacka_surrogates/"
-/// [`SurrogateFolder::clean_stale_surrogates`].\
-/// Then it will create a new fresh one [`SurrogateFolder::create_surrogate_root`].
-///
-/// Then for every step, using previous example:\
-/// * First step, create the first surrogate for the lightmapper [`SurrogateFolder::new`].\
-/// * Second step, create a new surrogate for the mipmapper [`SurrogateFolder::derive_surrogate_from_self`].\
-/// * Let's say the second step failed, but it was marked as not required, so we decide to skip it
-/// using [`SurrogateFolder::derive_surrogate_from_root`] which will derive a surrogate folder
-/// from the first step's surrogate, meaning any mistakes from the second step aren't carried over to step 3
-///
-///
-/// from there the packager will use the very last step's surrogate folder and use that as an input
-/// for the alpack writer
 pub struct SurrogateFolder {
     /// Path to the surrogate folder itself
     pub path: PathBuf,

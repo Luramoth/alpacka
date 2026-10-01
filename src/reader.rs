@@ -69,7 +69,12 @@ pub trait AssetAccessor {
     fn stream(&self, name: &str) -> Result<Box<dyn Read + Send + '_>, ReaderError>;
     fn extract_to_temp_file(&self, name: &str) -> Result<TempPath, ReaderError>;
 
+    /// creates a list of paths in a folder
+    ///
+    /// recursive makes the list drill down and list files inside subdirectories
     fn list(&self, folder: &str, recursive: bool) -> Result<Vec<String>, ReaderError>;
+
+    /// uses the normal list function but only returns paths that contain the specified extension
     fn list_with_extension(
         &self,
         folder: &str,
@@ -436,6 +441,12 @@ impl AssetAccessor for AlpackReader {
     }
 }
 
+/// for debugging purposes, the Loose Asset Reader reads files inside your assets folder.
+///
+/// It should work much the same way as the [`AlpackReader`] in terms of paths, but will not include
+/// any preprocessed content, so your engine should be made to expect that.
+///
+/// It will also log every time a file is accessed for debugging
 pub struct LooseAssetReader {
     asset_root: PathBuf,
     access_log: Mutex<BufWriter<File>>,

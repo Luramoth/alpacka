@@ -1,7 +1,22 @@
-﻿use std::fs;
-use std::path::Path;
-use crate::format::CompressionType;
+﻿//! Sidecar files that act as metadata for the files they are named after.
+//!
+//! # Example:
+//! ``` text
+//! Assets/
+//! └ Textures/
+//!   ├ Stones.png
+//!   └ Stones.png.meta.toml
+//! ```
+//! ## Contents:
+//! ``` toml
+//! [Pack]
+//! Compression = "deflate"
+//! Encrypted = false
+//! ```
 
+use crate::format::CompressionType;
+use std::fs;
+use std::path::Path;
 
 #[derive(serde::Deserialize, Eq, PartialEq)]
 pub struct Meta {
@@ -11,19 +26,21 @@ pub struct Meta {
 
 #[derive(serde::Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "PascalCase")]
-pub struct Pack{
+pub struct Pack {
     #[serde(default)]
     pub compression: Option<String>,
     #[serde(default = "default_encrypted")]
     pub encrypted: bool,
 }
 
-fn default_encrypted() -> bool {true}
+fn default_encrypted() -> bool {
+    true
+}
 
 impl Default for Meta {
     fn default() -> Self {
         Meta {
-            pack: Pack::default()
+            pack: Pack::default(),
         }
     }
 }
@@ -47,7 +64,7 @@ pub fn load_or_default(path: &Path) -> Meta {
 
     text = result.unwrap();
 
-    toml::from_str(&text).unwrap_or_else(|_| {Meta::default()})
+    toml::from_str(&text).unwrap_or_else(|_| Meta::default())
 }
 
 impl Meta {
@@ -68,40 +85,68 @@ impl Meta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::{assert_eq};
+    use pretty_assertions::assert_eq;
     use tempfile::env::temp_dir;
 
     #[test]
     fn get_compression_type_returns_none() {
-        let none = Meta {pack: Pack{ compression: Some("none".to_string()), encrypted: true}};
+        let none = Meta {
+            pack: Pack {
+                compression: Some("none".to_string()),
+                encrypted: true,
+            },
+        };
 
         assert_eq!(none.get_compression_type().unwrap(), CompressionType::None);
     }
 
     #[test]
     fn get_compression_type_returns_deflate() {
-        let deflate = Meta {pack: Pack{ compression: Some("deflate".to_string()), encrypted: true}};
+        let deflate = Meta {
+            pack: Pack {
+                compression: Some("deflate".to_string()),
+                encrypted: true,
+            },
+        };
 
-        assert_eq!(deflate.get_compression_type().unwrap(), CompressionType::Deflate);
+        assert_eq!(
+            deflate.get_compression_type().unwrap(),
+            CompressionType::Deflate
+        );
     }
 
     #[test]
     fn get_compression_type_returns_lz4() {
-        let lz4 = Meta {pack: Pack{ compression: Some("lz4".to_string()), encrypted: true}};
+        let lz4 = Meta {
+            pack: Pack {
+                compression: Some("lz4".to_string()),
+                encrypted: true,
+            },
+        };
 
         assert_eq!(lz4.get_compression_type().unwrap(), CompressionType::Lz4);
     }
 
     #[test]
     fn get_compression_type_returns_zstd() {
-        let zstd = Meta {pack: Pack{ compression: Some("zstd".to_string()), encrypted: true}};
+        let zstd = Meta {
+            pack: Pack {
+                compression: Some("zstd".to_string()),
+                encrypted: true,
+            },
+        };
 
         assert_eq!(zstd.get_compression_type().unwrap(), CompressionType::Zstd);
     }
 
     #[test]
     fn get_compression_type_returns_none_fallback() {
-        let fake = Meta {pack: Pack{ compression: Some("fake".to_string()), encrypted: true}};
+        let fake = Meta {
+            pack: Pack {
+                compression: Some("fake".to_string()),
+                encrypted: true,
+            },
+        };
 
         assert_eq!(fake.get_compression_type(), None);
     }

@@ -1,4 +1,9 @@
-﻿use crate::format::{
+﻿//! Writes alpacka archives
+//!
+//! refer to [`format`] for more details on the format, or further documentation in this module for
+//! how to use [`AlpackWriter`].
+
+use crate::format::{
     CHUNK_SIZE, CompressionType, ENTRY_SIZE, EncryptionType, Entry, HEADER_SIZE, Header,
     derive_entry_key,
 };
